@@ -20,7 +20,7 @@ Run full experiment:
     python -m experiment.runner --multi-model
 
 Run single model test (3 prompts):
-    python -m experiment.runner --test --model anthropic/claude-sonnet-4-6
+    python -m experiment.runner --test --model anthropic/claude-sonnet-4-6"""
 from __future__ import annotations
 
 import argparse
