@@ -96,7 +96,7 @@ def _models_yaml_block() -> str:
 
     if backend == "ollama":
         model_name = os.environ.get("OLLAMA_MODEL", "llama3")
-        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         return f"""
 models:
   - type: main
