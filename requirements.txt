@@ -13,3 +13,8 @@ python-dotenv>=1.0.0
 PyYAML>=6.0.0
 openai>=1.0.0
 openpyxl>=3.1.0
+
+# --- baselines/ (Lakera Guard + NeMo Guardrails comparison) ---
+nemoguardrails>=0.11.0
+langchain-openai>=0.2.0
+langchain-ollama>=0.2.0
