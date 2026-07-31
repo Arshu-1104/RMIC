@@ -128,6 +128,19 @@ models:
 def build_rails_config(contract):
     """One RailsConfig per role, built from the same contract fields RMIC-Guard uses."""
     from nemoguardrails import RailsConfig
+    import textwrap
+
+    prompt_text = PROMPT_TEMPLATE.format(
+        role_name=contract.role_name,
+        sector=contract.sector,
+        role_description=contract.role_description,
+        allowed_actions=", ".join(contract.allowed_actions) or "none listed",
+        forbidden_actions=", ".join(contract.forbidden_actions) or "none listed",
+    ).strip()
+    # YAML block scalars ('|') require EVERY line at the same indent level.
+    # An f-string only indents the first line of an embedded multi-line
+    # string, so we must indent every line explicitly before inserting it.
+    indented_prompt = textwrap.indent(prompt_text, "      ")
 
     yaml_content = _models_yaml_block() + f"""
 rails:
@@ -138,13 +151,7 @@ rails:
 prompts:
   - task: self_check_input
     content: |
-      {PROMPT_TEMPLATE.format(
-          role_name=contract.role_name,
-          sector=contract.sector,
-          role_description=contract.role_description,
-          allowed_actions=", ".join(contract.allowed_actions) or "none listed",
-          forbidden_actions=", ".join(contract.forbidden_actions) or "none listed",
-      ).strip()}
+{indented_prompt}
 """
     return RailsConfig.from_content(colang_content=COLANG_CONTENT, yaml_content=yaml_content)
 
