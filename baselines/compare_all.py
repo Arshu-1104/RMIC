@@ -21,7 +21,7 @@ from pathlib import Path
 
 from experiment.results_store import DEFAULT_DB_PATH, get_connection
 
-QUERY = """
+QUERY_ALL = """
 SELECT
     condition,
     COUNT(*) AS n,
@@ -35,6 +35,35 @@ SELECT
 FROM experiment_results
 GROUP BY condition
 ORDER BY condition
+"""
+
+# For each condition, restrict to rows from the single most recent run_id
+# that included that condition — avoids pooling old/historical runs (which
+# may use stale prompt sets or earlier, less-calibrated code) together with
+# a single fresh baseline run, which inflates baseline sample-size mismatch
+# and can hide miscalibration in older runs.
+QUERY_LATEST_ONLY = """
+WITH latest_run_per_condition AS (
+    SELECT er.condition, er.run_id, MAX(runs.started_at) AS started_at
+    FROM experiment_results er
+    JOIN experiment_runs runs ON runs.run_id = er.run_id
+    GROUP BY er.condition
+)
+SELECT
+    er.condition,
+    COUNT(*) AS n,
+    SUM(CASE WHEN er.expected_drift = 1 THEN 1 ELSE 0 END) AS n_adversarial,
+    SUM(CASE WHEN er.expected_drift = 0 THEN 1 ELSE 0 END) AS n_benign,
+    SUM(CASE WHEN er.expected_drift = 1 AND er.drift_detected = 1 THEN 1 ELSE 0 END) AS tp,
+    SUM(CASE WHEN er.expected_drift = 1 AND er.drift_detected = 0 THEN 1 ELSE 0 END) AS fn,
+    SUM(CASE WHEN er.expected_drift = 0 AND er.drift_detected = 1 THEN 1 ELSE 0 END) AS fp,
+    SUM(CASE WHEN er.expected_drift = 0 AND er.drift_detected = 0 THEN 1 ELSE 0 END) AS tn,
+    ROUND(AVG(er.latency_ms), 1) AS avg_latency_ms
+FROM experiment_results er
+JOIN latest_run_per_condition lrc
+    ON lrc.condition = er.condition AND lrc.run_id = er.run_id
+GROUP BY er.condition
+ORDER BY er.condition
 """
 
 
@@ -63,13 +92,20 @@ def compute_row(r) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Merge all conditions across all run_ids into one comparison.")
+    parser = argparse.ArgumentParser(description="Merge conditions across runs into one comparison.")
     parser.add_argument("--db-path", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--out", type=Path, default=Path("results/exports/condition_comparison_all.csv"))
+    parser.add_argument(
+        "--latest-only", action="store_true",
+        help="Only use each condition's single most recent run_id, instead of pooling every "
+             "historical run ever recorded for that condition. Use this for a fair, apples-to-apples "
+             "comparison against a single fresh baseline run.",
+    )
     args = parser.parse_args()
 
     conn = get_connection(args.db_path)
-    rows = [compute_row(r) for r in conn.execute(QUERY).fetchall()]
+    query = QUERY_LATEST_ONLY if args.latest_only else QUERY_ALL
+    rows = [compute_row(r) for r in conn.execute(query).fetchall()]
     conn.close()
 
     if not rows:
