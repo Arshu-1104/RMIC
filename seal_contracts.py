@@ -74,7 +74,7 @@ def main() -> None:
             print(f"contract_loader unavailable, using fallback for {p.stem}...")
             _seal_fallback(p)
 
-    print(f"All {len(paths)} contracts processed. Now run: python setup.py")
+    print(f"All {len(paths)} contracts processed. Now run: python preflight_check.py")
 
 
 if __name__ == "__main__":

@@ -71,10 +71,19 @@ def _check_data_scope(contract: RMICContract, plan: PlannedToolCall) -> str | No
     return None
 
 
+def _normalize_tool_name(name: str) -> str:
+    """Case/whitespace-insensitive form used only for matching, never for execution."""
+    return (name or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def _check_hard_rules(contract: RMICContract, plan: PlannedToolCall) -> str | None:
-    if plan.tool_name in contract.forbidden_actions:
+    planned = _normalize_tool_name(plan.tool_name)
+    forbidden_norm = {_normalize_tool_name(a) for a in contract.forbidden_actions}
+    allowed_norm = {_normalize_tool_name(a) for a in contract.allowed_actions}
+
+    if planned in forbidden_norm:
         return "forbidden_tool"
-    if contract.allowed_actions and plan.tool_name not in contract.allowed_actions:
+    if allowed_norm and planned not in allowed_norm:
         return "tool_not_allowed"
     pr = _check_parameter_constraints(contract, plan.arguments)
     if pr:
