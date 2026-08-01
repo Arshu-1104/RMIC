@@ -10,3 +10,8 @@ results/*.db
 results/*.jsonl
 results/exports/
 results/statistical_report.txt
+*.egg-info/
+build/
+dist/
+__pycache__/
+*.pyc
