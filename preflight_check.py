@@ -89,12 +89,15 @@ def main() -> None:
         gm_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
         gr_key = (os.environ.get("GROQ_API_KEY") or "").strip()
 
-        if an_key.startswith("sk-ant-"):
-            ok_line(".env exists and ANTHROPIC_API_KEY starts with sk-ant-")
-        else:
-            err_line(".env exists and ANTHROPIC_API_KEY starts with sk-ant-", "key missing, empty, or wrong prefix")
-
-        if provider == "gemini":
+        if provider == "anthropic":
+            if an_key.startswith("sk-ant-"):
+                ok_line(".env exists and ANTHROPIC_API_KEY starts with sk-ant-")
+            else:
+                err_line(
+                    ".env exists and ANTHROPIC_API_KEY starts with sk-ant-",
+                    "key missing, empty, or wrong prefix"
+                )
+        elif provider == "gemini":
             if gm_key:
                 ok_line("Active provider key check (GEMINI_API_KEY)")
             else:

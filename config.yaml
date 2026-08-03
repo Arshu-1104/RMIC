@@ -1,5 +1,5 @@
 model:
-  provider: anthropic          # default single-provider mode
+  provider: groq          # default single-provider mode
   # ── Anthropic models ──────────────────────────────────────────────────────
   anthropic_model: anthropic/claude-sonnet-4-6
   anthropic_haiku_model: anthropic/claude-haiku-4-5

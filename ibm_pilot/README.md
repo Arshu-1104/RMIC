@@ -1,0 +1,193 @@
+# IBM watsonx Orchestrate RMIC-Guard Pilot
+
+## 1. Project Overview
+
+RMIC-Guard is a runtime enforcement system built around machine-checkable identity contracts for autonomous AI agents. Rather than relying on prompt-level instructions alone, RMIC-Guard validates each planned agent action against a formally defined identity contract at runtime, allowing or blocking the action before it executes. This closes a common gap in agent deployments where an agent's behavior can drift away from its intended role, permissions, or operating boundaries over the course of a session.
+
+The purpose of this pilot is to validate RMIC-Guard's enforcement pipeline against IBM watsonx Orchestrate, an external agent orchestration framework. By wrapping the existing RMIC enforcement engine as a watsonx Orchestrate tool, this pilot demonstrates that RMIC-Guard's identity contract validation can be embedded into a third-party agent runtime without modifying the underlying enforcement logic.
+
+Runtime machine-checkable identity contracts protect AI agents from identity drift by defining, in a structured and verifiable format, what an agent is permitted to do, which tools it may call, and under what conditions. Every planned action is checked against this contract before execution. Actions that conform to the contract are allowed to proceed; actions that violate it — such as unauthorized permission escalation or behavior inconsistent with the agent's declared identity — are blocked and recorded, rather than being executed and discovered after the fact.
+
+This pilot serves as validation evidence that RMIC-Guard's enforcement model is portable across agent orchestration frameworks. It confirms that the core enforcement engine, contract loader, and audit ledger can be reused as-is, with only a thin adapter layer required to interface with IBM watsonx Orchestrate's tool-calling conventions.
+
+## 2. Architecture Overview
+
+The pilot follows this execution flow:
+
+```
+User Request
+→ IBM watsonx Orchestrate Agent
+→ RMIC Guard Tool
+→ Existing RMIC Enforcement Engine
+→ Identity Contract Validation
+→ ALLOW/BLOCK Decision
+→ Tool Execution or Rejection
+→ Signed Audit Ledger
+```
+
+A user request is received by an agent running inside IBM watsonx Orchestrate. Before the agent executes a planned action, it invokes the RMIC Guard Tool, which acts as an adapter into the existing RMIC repository. The RMIC Guard Tool forwards the request into the existing RMIC Enforcement Engine, which validates it against the relevant identity contract. The engine returns an ALLOW or BLOCK decision. If the decision is ALLOW, the underlying tool action is permitted to execute; if BLOCK, the action is rejected. In both cases, the outcome is recorded in the signed audit ledger.
+
+Critically, this pilot reuses the existing RMIC repository components — the enforcement engine, contract loader, reasoning layer, and audit ledger — rather than rewriting enforcement logic for IBM watsonx Orchestrate. The IBM pilot code is limited to the adapter and demonstration layer needed to connect an Orchestrate agent to the existing enforcement pipeline.
+
+## 3. Folder Structure
+
+Only the following verified files and directories are part of this pilot and its supporting repository:
+
+```
+RMIC/
+├── core/
+│   ├── enforcement_engine.py
+│   ├── contract_loader.py
+│   ├── audit_ledger.py
+│   ├── reasoning_layer.py
+│   └── tool_layer.py
+│
+├── contracts/
+│   └── financial_agent.json
+│
+├── ibm_pilot/
+│   ├── rmic_guard_tool.py
+│   ├── agent_example.py
+│   ├── demo.py
+│   └── test_rmic_guard.py
+│
+├── dashboard/
+├── evaluation/
+├── experiment/
+├── utils/
+│
+├── config.yaml
+├── setup.py
+├── seal_contracts.py
+└── requirements.txt
+```
+
+## 4. IBM Pilot Components
+
+### ibm_pilot/rmic_guard_tool.py
+
+This module acts as the adapter between IBM watsonx Orchestrate agent requests and the existing RMIC enforcement pipeline. It converts incoming Orchestrate requests into the request structures expected by the existing RMIC codebase, calls the existing `EnforcementEngine`, and returns a structured ALLOW/BLOCK response back to the calling agent. No enforcement logic is duplicated here — this module is purely a translation and integration layer.
+
+### ibm_pilot/agent_example.py
+
+This module registers RMIC Guard as a watsonx Orchestrate Python tool. It uses the IBM ADK tool decorator to expose the RMIC Guard adapter in a form that an Orchestrate agent can call directly. This allows an Orchestrate agent to invoke RMIC validation before carrying out an action, ensuring the identity contract check happens as part of the agent's normal planning and execution flow.
+
+### ibm_pilot/demo.py
+
+This script provides a local demonstration of the complete pipeline, from request through enforcement decision. It uses the existing reasoning layer for planning and exercises four scenarios:
+
+1. Valid financial transaction → ALLOW
+2. Valid account lookup → ALLOW
+3. Permission escalation → BLOCK
+4. Identity drift attack → BLOCK
+
+### ibm_pilot/test_rmic_guard.py
+
+This module contains automated pytest validation for the pilot. It tests valid requests, invalid requests, contract validation, tool validation, and audit logging, providing regression coverage for the adapter layer against the existing RMIC enforcement engine.
+
+## 5. Installation
+
+Create a virtual environment:
+
+```
+python -m venv .venv
+```
+
+Activate the environment:
+
+Windows:
+
+```
+.\.venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```
+pip install -r requirements.txt
+```
+
+Install the testing dependency:
+
+```
+pip install pytest
+```
+
+## 6. Environment Setup
+
+The pilot requires an API key configured for the model provider used by the reasoning layer. This key should be supplied using a `.env` file, with either `GROQ_API_KEY` or `ANTHROPIC_API_KEY` set depending on which model provider has been configured. No additional environment variables are required for this pilot.
+
+## 7. Running the Demo
+
+Seal the identity contracts before running the demo:
+
+```
+python seal_contracts.py
+```
+
+Run the pilot demo:
+
+```
+python ibm_pilot/demo.py
+```
+
+Running the demo executes the four scenarios described in Section 4 against the existing RMIC enforcement engine via the IBM pilot adapter, printing the expected and actual ALLOW/BLOCK decision for each scenario.
+
+## 8. Running Tests
+
+Set the Python path:
+
+```
+$env:PYTHONPATH="."
+```
+
+Run the pilot test suite:
+
+```
+pytest ibm_pilot/test_rmic_guard.py -v
+```
+
+Validated result: **11 tests passed**.
+
+## 9. Expected Demo Output
+
+```
+RMIC-Guard x IBM watsonx Orchestrate — local pilot demo
+
+Valid financial transaction:
+Expected: ALLOW
+Actual decision: ALLOW
+
+Valid account lookup:
+Expected: ALLOW
+Actual decision: ALLOW
+
+Permission escalation:
+Expected: BLOCK
+Actual decision: BLOCK
+
+Identity drift attack:
+Expected: BLOCK
+Actual decision: BLOCK
+```
+
+## 10. IBM watsonx Orchestrate Integration Explanation
+
+Within IBM watsonx Orchestrate, the integration works as follows: the IBM agent plans an action in response to a user request. Before that action is executed, RMIC Guard validates the planned action against the relevant identity contract using the existing RMIC enforcement engine. Only approved actions are allowed to proceed to execution. Actions that fail validation are rejected and recorded in the audit ledger rather than being executed. In this arrangement, RMIC Guard acts as a runtime identity enforcement layer sitting between the Orchestrate agent's planning step and its tool execution step.
+
+## 11. Limitations
+
+- This is a local pilot implementation, run and validated outside of a hosted IBM watsonx Orchestrate environment.
+- A production deployment requires an actual IBM watsonx Orchestrate environment rather than local invocation.
+- Session state handling across multi-turn Orchestrate agent interactions has not been addressed by this pilot and would need further consideration for production use.
+- Audit storage in this pilot relies on the existing local audit ledger; production deployment would require consideration of managed or persistent audit storage.
+- Additional external deployment requirements (hosting, credentials management, network access) are not covered by this local pilot.
+
+## 12. Future IBM Cloud Deployment
+
+Future work could extend this pilot toward a production deployment on IBM Cloud:
+
+- Deploy RMIC Guard as a production IBM tool or service rather than a local adapter.
+- Connect the deployed RMIC Guard service with live IBM watsonx Orchestrate agents.
+- Use managed storage for audit records in place of the local audit ledger.
+- Integrate with enterprise identity and governance systems to extend identity contract enforcement across an organization's broader agent deployments.
