@@ -6,3 +6,6 @@ __pycache__/
 results/
 ibm_pilot/__pycache__/
 project_files.txt
+data/
+dist/
+rmic_guard.egg-info/
