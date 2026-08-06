@@ -217,6 +217,17 @@ Each full run auto-exports to `results/exports/{run_id}.csv` (1,300 rows, 22 col
 
 ---
 
+## IBM watsonx Orchestrate Pilot
+
+RMIC-Guard has been deployed and verified live inside a real IBM
+watsonx Orchestrate instance, proving the enforcement model is portable
+to a third-party agent orchestration framework, not just this repo's
+own pipeline. See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
+for the architecture, live-verified results (4/4 test scenarios), and
+demo video.
+
+---
+
 ## Team Branches
 
 | Branch | Scope |

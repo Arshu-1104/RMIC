@@ -1,5 +1,13 @@
 # IBM watsonx Orchestrate RMIC-Guard Pilot
 
+> **Status: this pilot has since been deployed live** to a real watsonx
+> Orchestrate trial instance and verified end-to-end in a live agent
+> conversation. See [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md) for the
+> live architecture, results, and a demo video. The rest of this
+> document describes the original local-simulation pilot that preceded
+> the live deployment; Sections 11–12 below are now historical and are
+> superseded by `LIVE_DEPLOYMENT.md`.
+
 ## 1. Project Overview
 
 RMIC-Guard is a runtime enforcement system built around machine-checkable identity contracts for autonomous AI agents. Rather than relying on prompt-level instructions alone, RMIC-Guard validates each planned agent action against a formally defined identity contract at runtime, allowing or blocking the action before it executes. This closes a common gap in agent deployments where an agent's behavior can drift away from its intended role, permissions, or operating boundaries over the course of a session.
@@ -175,19 +183,37 @@ Actual decision: BLOCK
 
 Within IBM watsonx Orchestrate, the integration works as follows: the IBM agent plans an action in response to a user request. Before that action is executed, RMIC Guard validates the planned action against the relevant identity contract using the existing RMIC enforcement engine. Only approved actions are allowed to proceed to execution. Actions that fail validation are rejected and recorded in the audit ledger rather than being executed. In this arrangement, RMIC Guard acts as a runtime identity enforcement layer sitting between the Orchestrate agent's planning step and its tool execution step.
 
-## 11. Limitations
+## 11. Limitations (as of the local-simulation pilot)
 
-- This is a local pilot implementation, run and validated outside of a hosted IBM watsonx Orchestrate environment.
-- A production deployment requires an actual IBM watsonx Orchestrate environment rather than local invocation.
-- Session state handling across multi-turn Orchestrate agent interactions has not been addressed by this pilot and would need further consideration for production use.
-- Audit storage in this pilot relies on the existing local audit ledger; production deployment would require consideration of managed or persistent audit storage.
-- Additional external deployment requirements (hosting, credentials management, network access) are not covered by this local pilot.
+- This section described the local-simulation pilot before a live
+  deployment existed. **This has since been superseded** — see
+  [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md), which documents an actual
+  deployment to a hosted watsonx Orchestrate instance, its own
+  limitations (a simplified keyword-based drift check in place of the
+  full semantic IDS scoring, no persistent audit ledger, manual contract
+  sync), and live-verified results.
+- Session state handling across multi-turn Orchestrate agent
+  interactions has not been addressed by either the local or live
+  pilot and would need further consideration for production use.
+- Additional production-hardening requirements (hosting the full
+  enforcement engine as an installable package rather than a
+  sandbox-inlined stand-in, managed audit storage, enterprise identity
+  integration) remain open — see `LIVE_DEPLOYMENT.md` Section 4 and
+  "Option B" discussion for the path to running the *full* engine
+  live rather than the pilot-scope standalone tool.
 
-## 12. Future IBM Cloud Deployment
+## 12. What Actually Happened Next
 
-Future work could extend this pilot toward a production deployment on IBM Cloud:
+The "Future IBM Cloud Deployment" work originally sketched in this
+section has been completed: RMIC-Guard was deployed as a real tool
+(`ibm_pilot/orchestrate_tool_standalone.py`) inside a live watsonx
+Orchestrate trial instance, wired to a deployed agent
+(`ibm_pilot/rmic_financial_agent.yaml`), and verified against all four
+test scenarios in a live chat conversation. Full details, architecture
+differences from this local pilot, and results are in
+[`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md).
 
-- Deploy RMIC Guard as a production IBM tool or service rather than a local adapter.
-- Connect the deployed RMIC Guard service with live IBM watsonx Orchestrate agents.
-- Use managed storage for audit records in place of the local audit ledger.
-- Integrate with enterprise identity and governance systems to extend identity contract enforcement across an organization's broader agent deployments.
+Remaining future work: replacing the sandbox-inlined rule check with
+the full `core/` enforcement engine running as an installable package
+(see `LIVE_DEPLOYMENT.md`'s "Option B" discussion), and adding
+persistent audit storage for the live deployment.
