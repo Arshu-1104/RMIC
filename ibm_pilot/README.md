@@ -3,9 +3,10 @@
 > **Status: this pilot has since been deployed live** to a real watsonx
 > Orchestrate trial instance and verified end-to-end in a live agent
 > conversation. See [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md) for the
-> live architecture, results, and a demo video. The rest of this
-> document describes the original local-simulation pilot that preceded
-> the live deployment; Sections 11–12 below are now historical and are
+> live architecture, results, and demo video
+> (https://youtu.be/xQer0t_11fo). The rest of this document describes
+> the original local-simulation pilot that preceded the live
+> deployment; Sections 11–12 below are now historical and are
 > superseded by `LIVE_DEPLOYMENT.md`.
 
 ## 1. Project Overview
