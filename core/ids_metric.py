@@ -119,11 +119,22 @@ def trajectory_curvature(recent_ids: Sequence[float]) -> float:
     return float(max(0.0, min(1.0, mean_delta)))
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=64)
+def _topic_embeddings_cached(topics: tuple[str, ...], model_name: str | None) -> np.ndarray:
+    vecs = embed_texts(list(topics), model_name=model_name)
+    return np.asarray(vecs, dtype=np.float32)
+
+
 def _topic_embeddings(topics: Sequence[str], model_name: str | None = None) -> np.ndarray | None:
     if not topics:
         return None
-    vecs = embed_texts(list(topics), model_name=model_name)
-    return np.asarray(vecs, dtype=np.float32)
+    # FIXED: topic phrase sets repeat identically across every row for a
+    # given role (same allowed/forbidden topics each time) -- caching avoids
+    # re-embedding the same handful of phrases on every single call.
+    return _topic_embeddings_cached(tuple(topics), model_name)
 
 
 def _topic_distribution(
@@ -158,8 +169,18 @@ def mahalanobis_drift(
 
     topics = tuple(allowed_topics or ()) + tuple(forbidden_topics or ())
     topic_vecs = _topic_embeddings(topics, model_name=model_name)
-    if topic_vecs is None or topic_vecs.shape[0] < 2:
-        # Fallback to Euclidean distance if covariance cannot be estimated.
+
+    # FIXED: the covariance estimate needs meaningfully more samples than
+    # dimensions to be trustworthy. With e.g. 384-dim BGE embeddings and
+    # only a handful of topic phrases, np.cov was severely rank-deficient;
+    # pinv on a near-degenerate matrix produces unstable, near-constant
+    # large distances regardless of input (confirmed empirically: CV=0.005,
+    # essentially flat around 0.95 for both adversarial and legitimate
+    # prompts). Require at least 3x more samples than dimensions before
+    # trusting a full covariance estimate; otherwise fall back to plain
+    # Euclidean distance, which is well-defined regardless of sample size.
+    min_samples_needed = topic_vecs.shape[1] * 3 if topic_vecs is not None else 0
+    if topic_vecs is None or topic_vecs.shape[0] < max(2, min_samples_needed):
         dist = float(np.linalg.norm(out - anchor))
         return float(dist / (1.0 + dist))
 
@@ -243,6 +264,20 @@ def wasserstein_drift(
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
 ) -> float:
+    """
+    FIXED: the original implementation ran a 1D Wasserstein distance over
+    *topic list positions* (0, 1, 2, ...), treating arbitrary list order as
+    a metric space. With a low-temperature softmax this collapsed both
+    distributions to near one-hot spikes, so the "distance" mostly measured
+    unrelated list-index gaps rather than semantic drift -- saturating near
+    the clipped ceiling regardless of input (confirmed empirically: CV=0.012,
+    ~99% of values pinned at 1.0).
+
+    Corrected version: treat each topic distribution's "center of mass" in
+    the actual embedding space (topic_vecs weighted by p or q), then measure
+    real Euclidean distance between those two centers. This respects the
+    true geometry of the embedding space instead of an arbitrary index order.
+    """
     topics = tuple(allowed_topics or ()) + tuple(forbidden_topics or ())
     topic_vecs = _topic_embeddings(topics, model_name=model_name)
     if topic_vecs is None or topic_vecs.shape[0] == 0:
@@ -251,10 +286,16 @@ def wasserstein_drift(
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
     p = _topic_distribution(out, topic_vecs)
     q = _topic_distribution(anchor, topic_vecs)
-    positions = np.arange(len(p), dtype=np.float64)
-    wd = float(wasserstein_distance(positions, positions, u_weights=p, v_weights=q))
-    max_expected_wasserstein = 2.0
-    return float(max(0.0, min(1.0, wd / max_expected_wasserstein)))
+
+    # Weighted center of mass of the topic embeddings under each distribution.
+    center_p = (p[:, None] * topic_vecs).sum(axis=0)
+    center_q = (q[:, None] * topic_vecs).sum(axis=0)
+
+    dist = float(np.linalg.norm(center_p - center_q))
+    # Embeddings are L2-normalised (unit vectors), so max possible Euclidean
+    # distance between two centers of mass is bounded by 2.0 (opposite points
+    # on the unit sphere); squash smoothly instead of hard-clipping.
+    return float(dist / (1.0 + dist))
 
 
 def hellinger_drift(

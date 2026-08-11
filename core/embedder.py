@@ -50,9 +50,11 @@ def embed_texts(texts: list[str], model_name: str | None = None) -> np.ndarray:
     if not texts:
         return np.zeros((0, 0), dtype=np.float32)
     try:
-        from fastembed import TextEmbedding
-
-        model = TextEmbedding(model_name or DEFAULT_MODEL_NAME)
+        # FIXED: was instantiating TextEmbedding(...) fresh on every call,
+        # reloading the ONNX model/tokenizer/session from disk each time.
+        # Reuse the lru_cache'd instance from get_model() instead -- this
+        # is the difference between ~1-3s and ~1-3ms per call once warm.
+        model = get_model(model_name)
         embeddings = list(model.embed(texts))
         arr = np.array(embeddings, dtype=np.float32)
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
