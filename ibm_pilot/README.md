@@ -45,37 +45,46 @@ Only the following verified files and directories are part of this pilot and its
 ```
 RMIC/
 ├── core/
-│   ├── enforcement_engine.py
-│   ├── contract_loader.py
-│   ├── audit_ledger.py
-│   ├── reasoning_layer.py
-│   └── tool_layer.py
+│ ├── enforcement_engine.py
+│ ├── contract_loader.py
+│ ├── audit_ledger.py
+│ ├── reasoning_layer.py
+│ └── tool_layer.py
 │
 ├── contracts/
-│   └── financial_agent.json
+│ └── financial_agent.json
 │
 ├── ibm_pilot/
-│   ├── rmic_guard_tool.py
-│   ├── agent_example.py
-│   ├── demo.py
-│   └── test_rmic_guard.py
+│ ├── rmic_guard_tool.py
+│ ├── orchestrate_tool.py
+│ ├── agent_example.py
+│ ├── demo.py
+│ └── test_rmic_guard.py
 │
 ├── dashboard/
-├── evaluation/
 ├── experiment/
 ├── utils/
 │
 ├── config.yaml
-├── setup.py
+├── pyproject.toml
 ├── seal_contracts.py
 └── requirements.txt
 ```
+
+
+*(`orchestrate_tool.py`, `orchestrate_tool_standalone.py`, and the
+legal/healthcare pilot variants added after the local-simulation pilot are
+covered in [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md).)*
 
 ## 4. IBM Pilot Components
 
 ### ibm_pilot/rmic_guard_tool.py
 
 This module acts as the adapter between IBM watsonx Orchestrate agent requests and the existing RMIC enforcement pipeline. It converts incoming Orchestrate requests into the request structures expected by the existing RMIC codebase, calls the existing `EnforcementEngine`, and returns a structured ALLOW/BLOCK response back to the calling agent. No enforcement logic is duplicated here — this module is purely a translation and integration layer.
+
+### ibm_pilot/orchestrate_tool.py
+
+This is the actual `@tool`-decorated entry point importable by the Orchestrate ADK (`orchestrate tools import --kind python --file ibm_pilot/orchestrate_tool.py`). It doesn't reimplement anything — it constructs `ibm_pilot.rmic_guard_tool.RMICGuardTool` once per container instance and calls its existing `handle_request()` method on every invocation. It exists purely to satisfy the ADK's import contract (a single `@tool`-decorated function with typed params and a Google-style docstring).
 
 ### ibm_pilot/agent_example.py
 
