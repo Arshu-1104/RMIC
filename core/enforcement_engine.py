@@ -15,7 +15,7 @@ from core.audit_ledger import AuditEntry, AuditLedger, hash_text
 from core.contract_loader import RMICContract
 from core.ids_engine import IDSEngine
 from core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
-from core.reasoning_layer import PlannedToolCall
+from core.planning import PlannedToolCall
 from core.tool_layer import ToolRegistry, ToolResult
 from utils.config import load_config
 

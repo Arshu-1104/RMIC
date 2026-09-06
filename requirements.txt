@@ -1,20 +1,38 @@
+# Full research repo requirements: everything needed to run the SDK, the
+# experiment runner, the dashboard, and the baseline comparisons in THIS
+# repository. If you only want the RMIC-Guard SDK in your own project, do
+# NOT use this file -- run `pip install rmic-guard` (or `rmic-guard[anthropic]`
+# / `[groq]` / `[llm]`) instead, which installs a much smaller, purpose-scoped
+# dependency set defined in pyproject.toml.
+
+# --- core/ (contracts, enforcement, IDS, tool registry, audit ledger) ---
+# Same core dependency set as the published SDK's pyproject.toml.
+numpy>=1.26.0,<2.3.0
+scipy>=1.13.0
+cryptography>=42.0.0
+PyYAML>=6.0.0
+fastembed>=0.4.0,<0.9.0
+
+# --- core/reasoning_layer.py (LLM integrations -- optional for the SDK,
+#     required here because experiment/runner.py always uses them) ---
 anthropic>=0.34.0
 litellm>=1.56.0
-fastembed>=0.2.0
-sentence-transformers>=3.0.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# --- experiment/ + dashboard/ (this repo's research pipeline only) ---
 fastapi>=0.112.0
 uvicorn>=0.30.0
 httpx>=0.28.0
-cryptography>=42.0.0
 matplotlib>=3.9.0
-scipy>=1.13.0
-numpy>=1.26.0
-python-dotenv>=1.0.0
-PyYAML>=6.0.0
-openai>=1.0.0
 openpyxl>=3.1.0
 
 # --- baselines/ (Lakera Guard + NeMo Guardrails comparison) ---
 nemoguardrails>=0.11.0
 langchain-openai>=0.2.0
 langchain-ollama>=0.2.0
+
+# --- Optional: PyTorch-based embedding fallback if fastembed's ONNX
+#     backend doesn't work on your platform (mirrors pyproject.toml's
+#     rmic-guard[torch] extra) ---
+# sentence-transformers>=3.0.0

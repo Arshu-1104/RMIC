@@ -18,17 +18,61 @@ run the research experiments in this repo), install it from PyPI:
 pip install rmic-guard
 ```
 
-If your platform can't run `fastembed`'s ONNX backend, install the PyTorch-based
-fallback instead:
+This installs only core enforcement functionality (contracts, validation, hard-rule +
+semantic-drift enforcement, tool registry, audit ledger) — no LLM provider SDKs. If your
+platform can't run `fastembed`'s ONNX backend, install the PyTorch-based fallback instead:
 
 ```bash
 pip install "rmic-guard[torch]"
 ```
 
-```python
-from rmic_guard import load_contract, EnforcementEngine, ClaudeReasoning
+To also plan tool calls with a real LLM (Claude and/or Groq), install the matching extra:
 
-contract = load_contract("contracts/financial_agent.json")
+```bash
+pip install "rmic-guard[anthropic]"   # Claude, via LiteLLM
+pip install "rmic-guard[groq]"        # Groq/Llama, via LiteLLM
+pip install "rmic-guard[llm]"         # both
+```
+
+### Beginner API — no contract-hashing/embedding internals required
+
+```python
+from rmic_guard import RMICContract, ToolRegistry, EnforcementEngine
+from core.planning import PlannedToolCall
+
+contract = RMICContract.create(
+    agent_id="research-agent",
+    role_name="Research Agent",
+    sector="research",
+    semantic_anchors=[
+        "I perform research and information gathering.",
+        "I do not perform destructive or unauthorized actions.",
+    ],
+    allowed_actions=["web_search"],
+    forbidden_actions=["delete_data"],
+)
+
+tools = ToolRegistry()
+tools.register("web_search", lambda query: {"results": [f"Search results for: {query}"]})
+
+engine = EnforcementEngine(contract=contract, tools=tools)
+outcome = engine.evaluate_and_maybe_execute(
+    PlannedToolCall("web_search", {"query": "hello"}, "hello"), recent_ids=[],
+)
+print(outcome.decision)  # "PASS" | "WARN" | "BLOCK" | "NEEDS_RECOVERY" | "PREEMPTIVE_WARN"
+```
+
+Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
+`examples/basic_enforcement.py`, `examples/contract_creation.py`, and
+`examples/identity_drift.py` for parameter constraints, data scope, the advanced
+contract API, and semantic drift scoring respectively.
+
+### Advanced / low-level API
+
+```python
+from rmic_guard import load_contract, seal_contract_file, verify_contract, EnforcementEngine, ClaudeReasoning
+
+contract = load_contract("contracts/financial_agent.json")  # verifies contract_hash by default
 reasoning = ClaudeReasoning()
 plan = reasoning.plan_tool_call(user_message, contract=contract, condition="C")
 
@@ -36,7 +80,7 @@ engine = EnforcementEngine(contract=contract, tools=my_tool_registry, ledger=Non
 outcome = engine.evaluate_and_maybe_execute(
     plan, recent_ids=[], drift_type=None, execute_tool=True, enforcement_mode="full",
 )
-print(outcome.decision)  # "PASS" | "WARN" | "BLOCK" | "NEEDS_RECOVERY" | "PREEMPTIVE_WARN"
+print(outcome.decision)
 ```
 
 Groq (Llama) is supported as a drop-in alternative to Claude:
@@ -46,9 +90,34 @@ from rmic_guard import GroqReasoning
 reasoning = GroqReasoning(model_name="groq/llama-3.3-70b-versatile")
 ```
 
-See [`PYPI_README.md`](PYPI_README.md) and [`examples/quickstart.py`](examples/quickstart.py)
-for more. The sections below are for running the full research experiment
-(benchmarking, dashboard, multi-model comparison) from a clone of this repo.
+### CLI
+
+```bash
+rmic init research-agent        # scaffold a new agent project (contract + quickstart)
+rmic validate contract.json     # check a contract against the schema, no sealing
+rmic seal contract.json         # compute anchor_embedding + contract_hash, write back
+rmic verify contract.json       # check a sealed contract's hash is still intact
+```
+
+### Contract validation errors
+
+Invalid contracts raise `InvalidContractError` listing every problem found (not just the
+first), instead of a bare `KeyError`/`TypeError`:
+
+```text
+Invalid RMIC contract (RMICContract.create(...)):
+  - role_name: missing required field (expected a non-empty string)
+  - semantic_anchors: must contain at least one sentence
+  - ids_warn_threshold must be <= ids_block_threshold (got warn=0.9, block=0.1)
+
+See schema/contract.schema.json for the full contract schema.
+```
+
+The full contract schema is documented in [`schema/contract.schema.json`](schema/contract.schema.json).
+
+See [`PYPI_README.md`](PYPI_README.md) for more. The sections below are for running the
+full research experiment (benchmarking, dashboard, multi-model comparison) from a clone
+of this repo.
 
 ---
 
@@ -56,8 +125,9 @@ for more. The sections below are for running the full research experiment
 
 | Path | Contents |
 |---|---|
-| `core/` | The enforcement engine: contract loading (`contract_loader.py`), hard-rule + IDS enforcement (`enforcement_engine.py`), the IDS scoring wrapper (`ids_engine.py`) and its 7 signal implementations (`ids_metric.py`), local embeddings (`embedder.py`, `embedding_interface.py`), the signed audit ledger (`audit_ledger.py`), re-anchoring recovery (`recovery_engine.py`), tool dispatch (`tool_layer.py`), and reproducibility manifests (`integrity_manifest.py`). |
-| `rmic_guard/` | The public SDK facade re-exported for `pip install rmic-guard` — no logic of its own; imports from `core/`. |
+| `core/` | The enforcement engine: contract loading (`contract_loader.py`), explicit pre-validation (`validation.py`), the SDK exception hierarchy (`exceptions.py`), litellm-free tool-call planning data model (`planning.py`), hard-rule + IDS enforcement (`enforcement_engine.py`), the IDS scoring wrapper (`ids_engine.py`) and its 7 signal implementations (`ids_metric.py`), local embeddings with a pluggable backend (`embedder.py`, `embedding_interface.py`), the signed audit ledger (`audit_ledger.py`), re-anchoring recovery (`recovery_engine.py`), tool dispatch (`tool_layer.py`), LLM reasoning backends (`reasoning_layer.py`), and reproducibility manifests (`integrity_manifest.py`). |
+| `rmic_guard/` | The public SDK facade re-exported for `pip install rmic-guard` — `__init__.py` re-exports from `core/` (lazily for the optional LLM reasoning backends, so they don't force a `litellm` install), and `cli.py` implements the `rmic` command-line tool. |
+| `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `core/validation.py`'s error messages. |
 | `utils/` | Shared config loading (`config.py`) for `config.yaml`. |
 | `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`) plus a blank `_template_universal.json`. |
 | `prompts/` | The adversarial/legitimate prompt corpus, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`). |
@@ -65,7 +135,8 @@ for more. The sections below are for running the full research experiment
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
 | `ibm_pilot/` | IBM watsonx Orchestrate integration — see below. |
-| `examples/` | `quickstart.py` — minimal end-to-end SDK usage. |
+| `examples/` | `quickstart.py` (offline PASS/BLOCK), `basic_enforcement.py` (parameter/data-scope rules), `contract_creation.py` (beginner vs. advanced contract API), `identity_drift.py` (semantic IDS scoring). |
+| `tests/` | `pytest` suite covering contract creation/validation/integrity, enforcement decisions, tool registry, and IDS scoring — `pytest tests/`. |
 | `demo.py` | Root-level killer demo for Condition C (middleware-only enforcement). |
 | `preflight_check.py` | No-API-call environment validation. |
 | `seal_contracts.py` | Computes and writes the SHA-256 `contract_hash` (and embedding anchor, where possible) for each file in `contracts/`. |
@@ -75,7 +146,9 @@ for more. The sections below are for running the full research experiment
 
 ## Prerequisites
 
-- Python 3.10+ (3.11 recommended; developed and tested primarily on Windows)
+- Python 3.10–3.13 (3.11 recommended; developed and tested primarily on Windows).
+  3.14 is not yet supported — `fastembed`'s pinned `onnxruntime` releases don't have
+  verified Windows wheels for 3.14 at time of writing.
 - Anthropic API key (`sk-ant-...`) with credits
 
 ---

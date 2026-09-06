@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rmic-guard"
-version = "0.1.0"
+version = "0.2.0"
 description = "Role-boundary preservation and identity-drift detection for autonomous LLM agents."
 readme = "PYPI_README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "Arshitha S", email = "arshitha.s1104@gmail.com" },
     { name = "Charithra H S", email = "charithrahs@gmail.com" },
@@ -17,29 +17,54 @@ authors = [
 ]
 keywords = ["llm", "agents", "safety", "guardrails", "prompt-injection", "drift-detection"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Security",
 ]
 
+# ── Core dependencies ────────────────────────────────────────────────────
+# Everything EnforcementEngine/RMICContract/ToolRegistry/AuditLedger need,
+# with no LLM provider SDKs attached. `fastembed` is core (not optional)
+# because semantic drift detection (IDS) is core RMIC-Guard functionality,
+# not an LLM integration -- it runs a small local ONNX embedding model, no
+# API key and no LLM call. Agents that only need hard-rule enforcement can
+# skip the embedding step entirely via RMICContract.create(require_embedding=False)
+# and never trigger fastembed's model download.
 dependencies = [
-    "litellm>=1.56.0",
-    "numpy>=1.26.0",
+    "numpy>=1.26.0,<2.3.0",
     "scipy>=1.13.0",
     "cryptography>=42.0.0",
     "PyYAML>=6.0.0",
-    "fastembed>=0.2.0",
+    "fastembed>=0.4.0,<0.9.0",
 ]
 
 [project.optional-dependencies]
+# LLM reasoning backends (core.reasoning_layer / ClaudeReasoning / GroqReasoning).
+# Split by provider so installing one doesn't pull the other's SDK.
+anthropic = ["litellm>=1.56.0", "anthropic>=0.34.0"]
+groq = ["litellm>=1.56.0"]
+# Everything in `anthropic` + `groq` combined, for convenience.
+llm = ["litellm>=1.56.0", "anthropic>=0.34.0"]
 # Fallback embedding backend if fastembed's ONNX runtime isn't available on
 # your platform. Pulls in torch — heavier, so kept optional.
 torch = ["sentence-transformers>=3.0.0"]
+# JSON-Schema-based validation of schema/contract.schema.json in addition to
+# the built-in core.validation checks (core.validation itself has no
+# jsonschema dependency and always runs regardless of this extra).
+schema = ["jsonschema>=4.20.0"]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+rmic = "rmic_guard.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Arshu-1104/RMIC"
@@ -53,8 +78,11 @@ Repository = "https://github.com/Arshu-1104/RMIC"
 # user's environment. A cleaner V2 would rename these (e.g. to
 # rmic_guard_core / rmic_guard_utils) and update all internal imports
 # across experiment/, dashboard/, and baselines/ to match — a larger
-# refactor, intentionally deferred so it doesn't block this first release.
+# refactor, intentionally deferred so it doesn't block this release.
 packages = ["rmic_guard", "core", "utils"]
 
 [tool.setuptools.package-data]
 rmic_guard = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

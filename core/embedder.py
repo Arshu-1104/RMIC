@@ -13,10 +13,40 @@ __all__ = [
     "cosine_similarity",
     "embed_texts",
     "get_model",
+    "get_embedding_backend",
     "normalise_l2",
+    "set_embedding_backend",
 ]
 
 DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # fastembed model name
+
+# Optional injection point: point this at a pre-downloaded/offline model, a
+# remote embedding API, or a deterministic stub for tests — without touching
+# any other RMIC-Guard code. See section 20 of the packaging notes: this is
+# the "embedding_provider=..." escape hatch so a caller can make first-run
+# network behaviour explicit instead of implicit.
+#
+#     from core.embedder import set_embedding_backend
+#     set_embedding_backend(lambda texts: my_own_embed_fn(texts))
+#
+# The callable takes list[str] and must return an (n, dim) float32 array;
+# embed_texts() L2-normalises the result for you.
+_embedding_backend: Any = None
+
+
+def set_embedding_backend(fn: Any | None) -> None:
+    """Install (or clear, with None) a custom embedding callable.
+
+    fn(texts: list[str]) -> np.ndarray of shape (len(texts), dim). When set,
+    embed_texts() calls this instead of loading fastembed/sentence-transformers,
+    so no network access or local model file is required.
+    """
+    global _embedding_backend
+    _embedding_backend = fn
+
+
+def get_embedding_backend() -> Any | None:
+    return _embedding_backend
 
 
 @lru_cache(maxsize=4)
@@ -49,6 +79,11 @@ def embed_texts(texts: list[str], model_name: str | None = None) -> np.ndarray:
     """Return L2-normalised embeddings, shape (n, dim)."""
     if not texts:
         return np.zeros((0, 0), dtype=np.float32)
+    if _embedding_backend is not None:
+        arr = np.asarray(_embedding_backend(texts), dtype=np.float32)
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)
+        return (arr / norms).astype(np.float32)
     try:
         # FIXED: was instantiating TextEmbedding(...) fresh on every call,
         # reloading the ONNX model/tokenizer/session from disk each time.

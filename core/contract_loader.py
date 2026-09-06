@@ -1,4 +1,15 @@
-"""Load, cryptographically seal, and verify RMIC identity contracts."""
+"""Load, cryptographically seal, and verify RMIC identity contracts.
+
+Two API tiers are exposed:
+
+  Beginner:  RMICContract.create(...)      -- validates, embeds anchors,
+                                               hashes, and seals in one call.
+  Advanced:  load_contract(...)
+             seal_contract_file(...)
+             compute_contract_hash(...)     -- direct, low-level access.
+
+Both tiers produce the same frozen RMICContract dataclass.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +19,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+
+from core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
+from core.validation import validate_contract_dict
 from utils.config import load_config
 
 __all__ = [
@@ -18,6 +32,7 @@ __all__ = [
     "compute_contract_hash",
     "load_contract",
     "seal_contract_file",
+    "verify_contract",
 ]
 
 
@@ -95,6 +110,52 @@ class RMICContract:
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise back to the JSON contract shape (round-trips through load_contract).
+
+        anchor_embedding is omitted entirely when empty (not sealed with an
+        embedding) rather than written as an empty list or null — this keeps
+        the hash-relevant field set identical to what create_contract()/
+        seal_contract_file() would have hashed, so contract_hash stays valid
+        after a to_dict() -> JSON -> load_contract() round trip.
+        """
+        d: dict[str, Any] = {
+            "agent_id": self.agent_id,
+            "role_name": self.role_name,
+            "sector": self.sector,
+            "role_description": self.role_description,
+            "semantic_anchors": list(self.semantic_anchors),
+            "allowed_actions": list(self.allowed_actions),
+            "forbidden_actions": list(self.forbidden_actions),
+            "data_scope": {
+                "accessible": list(self.data_scope.accessible),
+                "prohibited": list(self.data_scope.prohibited),
+                "pii_categories": list(self.data_scope.pii_categories),
+            },
+            "parameter_constraints": {
+                c.name: {"min": c.min, "max": c.max, "type": c.value_type}
+                for c in self.parameter_constraints
+            },
+            "ids_warn_threshold": self.ids_warn_threshold,
+            "ids_block_threshold": self.ids_block_threshold,
+            "drift_velocity_threshold": self.drift_velocity_threshold,
+            "recovery_policy": self.recovery_policy,
+            "compliance_tags": list(self.compliance_tags),
+            "contract_version": self.contract_version,
+            "created_at": self.created_at,
+            "contract_hash": self.contract_hash,
+        }
+        if self.anchor_embedding:
+            d["anchor_embedding"] = list(self.anchor_embedding)
+        return d
+
+    # ---- Beginner-friendly high-level API -------------------------------
+    #
+    # Implemented as create_contract() below and attached to this class at
+    # module import time (`RMICContract.create = staticmethod(create_contract)`)
+    # so it can be called as `RMICContract.create(...)`. Kept as a plain
+    # module-level function too, for callers who prefer `create_contract(...)`.
+
 
 def _as_tuple_str(v: Any) -> tuple[str, ...]:
     if v is None:
@@ -104,43 +165,36 @@ def _as_tuple_str(v: Any) -> tuple[str, ...]:
     return tuple(str(x) for x in v)
 
 
-def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool) -> RMICContract:
+def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, source: str | None = None) -> RMICContract:
+    validate_contract_dict(data, source=source)
+
     cfg = load_config()
     tcfg = cfg.get("thresholds", {})
     stored_hash = data.get("contract_hash")
     if require_hash_match:
         if not stored_hash:
-            raise ValueError("contract_hash missing; seal the contract before load with verify")
+            raise ContractNotSealedError(
+                "contract_hash missing; call seal_contract_file(...) or RMICContract.create(...) "
+                "before loading with verify_hash=True"
+            )
         computed = compute_contract_hash(data)
         if computed != stored_hash:
-            raise ValueError("contract_hash mismatch — contract was tampered with or corrupted")
+            raise ContractIntegrityError(
+                "contract_hash mismatch — the contract file was modified after sealing, or is "
+                "corrupted. Re-seal it if the change was intentional."
+            )
 
     ds_raw = data.get("data_scope") or {}
-    if not isinstance(ds_raw, dict):
-        raise TypeError("data_scope must be an object")
-
     pc_raw = data.get("parameter_constraints") or {}
-    if not isinstance(pc_raw, dict):
-        raise TypeError("parameter_constraints must be an object")
 
     constraints: list[ParameterConstraint] = []
     for name in sorted(pc_raw.keys()):
-        spec = pc_raw[name]
-        if not isinstance(spec, dict):
-            raise TypeError(f"parameter_constraints.{name} must be an object")
-        constraints.append(ParameterConstraint.from_entry(name, spec))
+        constraints.append(ParameterConstraint.from_entry(name, pc_raw[name]))
 
     anchors = _as_tuple_str(data.get("semantic_anchors"))
-    if not anchors:
-        raise ValueError("semantic_anchors must contain at least one sentence")
 
     emb = data.get("anchor_embedding")
-    if emb is None:
-        anchor_embedding: tuple[float, ...] = ()
-    else:
-        if not isinstance(emb, list):
-            raise TypeError("anchor_embedding must be a list of floats (seal the contract first)")
-        anchor_embedding = tuple(float(x) for x in emb)
+    anchor_embedding: tuple[float, ...] = () if emb is None else tuple(float(x) for x in emb)
 
     return RMICContract(
         agent_id=str(data["agent_id"]),
@@ -174,12 +228,15 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool) -> RM
 
 
 def load_contract(path: str | Path, *, verify_hash: bool = True) -> RMICContract:
-    """Load a contract JSON file and optionally verify SHA-256 integrity."""
+    """Load a contract JSON file, validate it, and optionally verify SHA-256 integrity."""
     p = Path(path)
-    raw = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise InvalidContractError([f"file is not valid JSON: {exc}"], source=str(p)) from exc
     if not isinstance(raw, dict):
-        raise TypeError("contract file must contain a JSON object")
-    return _contract_from_dict(raw, require_hash_match=verify_hash)
+        raise InvalidContractError(["contract file must contain a JSON object"], source=str(p))
+    return _contract_from_dict(raw, require_hash_match=verify_hash, source=str(p))
 
 
 def seal_contract_file(
@@ -196,14 +253,17 @@ def seal_contract_file(
     from core.embedder import anchor_centroid_from_anchors
 
     p = Path(path)
-    data = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise InvalidContractError([f"file is not valid JSON: {exc}"], source=str(p)) from exc
     if not isinstance(data, dict):
-        raise TypeError("contract file must contain a JSON object")
+        raise InvalidContractError(["contract file must contain a JSON object"], source=str(p))
+
+    # Validate the pre-seal shape (anchor_embedding/contract_hash aren't required yet).
+    validate_contract_dict({k: v for k, v in data.items() if k not in ("anchor_embedding", "contract_hash")}, source=str(p))
 
     anchors = _as_tuple_str(data.get("semantic_anchors"))
-    if not anchors:
-        raise ValueError("semantic_anchors must contain at least one sentence")
-
     centroid = anchor_centroid_from_anchors(list(anchors), model_name=model_name)
     data["anchor_embedding"] = [float(x) for x in centroid.tolist()]
 
@@ -215,4 +275,113 @@ def seal_contract_file(
     if write_back:
         p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    return _contract_from_dict(data, require_hash_match=True)
+    return _contract_from_dict(data, require_hash_match=True, source=str(p))
+
+
+def verify_contract(path: str | Path) -> bool:
+    """Advanced API: return True iff the on-disk contract's hash matches its content.
+
+    Never raises on a hash mismatch (unlike load_contract(verify_hash=True)) —
+    use this when you just want a boolean check, e.g. from the CLI.
+    """
+    try:
+        load_contract(path, verify_hash=True)
+        return True
+    except ContractIntegrityError:
+        return False
+
+
+# ---- Beginner-friendly high-level API ------------------------------------
+
+def create_contract(
+    *,
+    agent_id: str,
+    role_name: str,
+    sector: str,
+    semantic_anchors: list[str],
+    role_description: str = "",
+    allowed_actions: list[str] | None = None,
+    forbidden_actions: list[str] | None = None,
+    data_scope: Mapping[str, Any] | None = None,
+    parameter_constraints: Mapping[str, Mapping[str, Any]] | None = None,
+    ids_warn_threshold: float | None = None,
+    ids_block_threshold: float | None = None,
+    drift_velocity_threshold: float | None = None,
+    recovery_policy: str = "re-anchor",
+    compliance_tags: list[str] | None = None,
+    contract_version: str = "1.0.0",
+    save_to: str | Path | None = None,
+    model_name: str | None = None,
+    require_embedding: bool = True,
+) -> RMICContract:
+    """High-level contract factory: validate -> embed anchors -> hash -> seal.
+
+    Hides contract_hash / anchor_embedding / sealing internals. Raises
+    InvalidContractError (listing every problem found) if the inputs don't
+    form a valid contract. Pass save_to="contracts/my_agent.json" to also
+    persist the sealed contract to disk.
+
+    require_embedding: when True (default), computes anchor_embedding via a
+    local sentence-embedding model (downloaded once on first use — see
+    core.embedder.set_embedding_backend to point at a pre-downloaded/offline
+    model instead). Semantic drift detection (EnforcementMode "full" /
+    "ids_only") needs this. Set to False to skip it entirely and produce a
+    contract usable only in EnforcementMode "hard_rules_only" — useful for
+    agents that only need forbidden-tool / parameter / data-scope
+    enforcement, or for offline contract authoring before a model is
+    available.
+    """
+    from core.embedder import anchor_centroid_from_anchors
+
+    cfg = load_config()
+    tcfg = cfg.get("thresholds", {})
+    _ds = dict(data_scope or {})
+    normalized_data_scope = {
+        "accessible": list(_ds.get("accessible") or []),
+        "prohibited": list(_ds.get("prohibited") or []),
+        "pii_categories": list(_ds.get("pii_categories") or []),
+    }
+    data: dict[str, Any] = {
+        "agent_id": agent_id,
+        "role_name": role_name,
+        "sector": sector,
+        "role_description": role_description,
+        "semantic_anchors": list(semantic_anchors),
+        "allowed_actions": list(allowed_actions or []),
+        "forbidden_actions": list(forbidden_actions or []),
+        "data_scope": normalized_data_scope,
+        "parameter_constraints": {k: dict(v) for k, v in (parameter_constraints or {}).items()},
+        "ids_warn_threshold": (
+            float(ids_warn_threshold) if ids_warn_threshold is not None else float(tcfg.get("warn_threshold", 0.35))
+        ),
+        "ids_block_threshold": (
+            float(ids_block_threshold) if ids_block_threshold is not None else float(tcfg.get("block_threshold", 0.60))
+        ),
+        "drift_velocity_threshold": (
+            float(drift_velocity_threshold)
+            if drift_velocity_threshold is not None
+            else float(tcfg.get("velocity_threshold", 0.05))
+        ),
+        "recovery_policy": recovery_policy,
+        "compliance_tags": list(compliance_tags or []),
+        "contract_version": contract_version,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    validate_contract_dict(data, source="RMICContract.create(...)")
+
+    if require_embedding:
+        centroid = anchor_centroid_from_anchors(list(data["semantic_anchors"]), model_name=model_name)
+        data["anchor_embedding"] = [float(x) for x in centroid.tolist()]
+    data["contract_hash"] = compute_contract_hash(data)
+
+    if save_to is not None:
+        p = Path(save_to)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return _contract_from_dict(data, require_hash_match=True, source="RMICContract.create(...)")
+
+
+# Attach the beginner API onto the frozen dataclass so `RMICContract.create(...)` works.
+RMICContract.create = staticmethod(create_contract)

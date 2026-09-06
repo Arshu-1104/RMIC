@@ -1,18 +1,25 @@
-﻿"""Reasoning layer — Anthropic (Claude Sonnet / Haiku) + Groq (Llama / Mixtral)."""
+"""Reasoning layer — Anthropic (Claude Sonnet / Haiku) + Groq (Llama / Mixtral)."""
 
 from __future__ import annotations
 
-import json
 import os
 import time
 import warnings
-from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-import litellm
-from litellm import RateLimitError
+try:
+    import litellm
+    from litellm import RateLimitError
+except ImportError as _exc:  # pragma: no cover - exercised only without extras
+    raise ImportError(
+        "core.reasoning_layer requires the optional LLM integration dependencies "
+        '(litellm). Install with: pip install "rmic-guard[llm]" (or [anthropic] / [groq]). '
+        "Core contract/enforcement functionality (rmic_guard.RMICContract, "
+        "rmic_guard.EnforcementEngine, rmic_guard.ToolRegistry, ...) does not require this."
+    ) from _exc
 
 from core.contract_loader import RMICContract
+from core.planning import PlannedToolCall, ResponseValidator, parse_planned_json
 from utils.config import load_config
 
 __all__ = [
@@ -43,49 +50,6 @@ _RETIRED_ANTHROPIC_MODELS: frozenset[str] = frozenset({
     "claude-3-5-haiku-20241022",
     "claude-3-5-sonnet-latest",
 })
-
-
-# ── Data structures ───────────────────────────────────────────────────────────
-
-@dataclass
-class PlannedToolCall:
-    """Structured plan produced by the model before tool execution."""
-    tool_name: str
-    arguments: dict[str, Any]
-    raw_text: str
-    data_categories_accessed: tuple[str, ...] = ()
-
-
-class ResponseValidator:
-    """Validate and coerce model JSON output before creating PlannedToolCall."""
-
-    CORRECTION_PROMPT = (
-        "Your previous response was not valid JSON or had wrong format.\n"
-        "You MUST respond with ONLY this JSON structure, no other text:\n"
-        '{\n  "tool_name": "<exact tool name to call>",\n'
-        '  "arguments": {},\n  "data_categories_accessed": []\n}\n'
-        "Do not add explanations, markdown, or any text outside the JSON object."
-    )
-
-    _BAD_TOOL_NAMES = {"refused", "refusal", "decline", "error", ""}
-
-    @classmethod
-    def validate_and_parse(cls, text: str, context: str) -> tuple[PlannedToolCall, bool]:
-        _ = context
-        plan = parse_planned_json(text)
-        return (plan, True) if cls._is_valid(plan) else (PlannedToolCall("refused", {}, text, ()), False)
-
-    @classmethod
-    def _is_valid(cls, plan: PlannedToolCall) -> bool:
-        if not isinstance(plan.tool_name, str):
-            return False
-        if plan.tool_name.strip().lower() in cls._BAD_TOOL_NAMES:
-            return False
-        if not isinstance(plan.arguments, dict):
-            return False
-        if not isinstance(plan.data_categories_accessed, tuple):
-            return False
-        return True
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,33 +137,6 @@ def _user_instructions_for_plan(contract: RMICContract | None = None, condition:
             f"{exact_list}. Do not paraphrase or invent a similar-sounding name."
         )
     return base
-
-
-def parse_planned_json(text: str) -> PlannedToolCall:
-    """Best-effort parse of model output into PlannedToolCall."""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = lines[1:] if lines[0].startswith("```") else lines
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
-    try:
-        obj = json.loads(cleaned)
-    except json.JSONDecodeError:
-        return PlannedToolCall("refused", {}, text, ())
-    tool_name = str(obj.get("tool_name", "")).strip()
-    args = obj.get("arguments") or {}
-    if not isinstance(args, dict):
-        args = {}
-    dca = obj.get("data_categories_accessed") or []
-    cats = (dca,) if isinstance(dca, str) else tuple(str(x) for x in dca)
-    return PlannedToolCall(
-        tool_name=tool_name,
-        arguments={k: v for k, v in args.items()},
-        raw_text=text,
-        data_categories_accessed=cats,
-    )
 
 
 # ── Backend protocol ──────────────────────────────────────────────────────────
