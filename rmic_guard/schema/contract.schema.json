@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Arshu-1104/RMIC/schema/contract.schema.json",
+  "title": "RMIC Identity Contract",
+  "description": "Schema for an RMIC-Guard identity contract, both unsealed (author-time) and sealed (contract_hash + anchor_embedding present) forms. This is the authoritative reference for core.validation.validate_contract_dict.",
+  "type": "object",
+  "required": ["agent_id", "role_name", "sector", "semantic_anchors"],
+  "additionalProperties": true,
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable machine identifier for the agent this contract governs."
+    },
+    "role_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable role name, e.g. 'Research Agent'."
+    },
+    "sector": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Domain/sector this agent operates in, e.g. 'research', 'finance', 'healthcare'."
+    },
+    "role_description": {
+      "type": "string",
+      "description": "Optional free-text description of the role.",
+      "default": ""
+    },
+    "semantic_anchors": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "First-person sentences describing what the agent does. Embedded once at seal time into anchor_embedding; used at runtime to measure role_distance."
+    },
+    "allowed_actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Exact tool names this contract permits. Empty list means no allow-list restriction (only forbidden_actions applies)."
+    },
+    "forbidden_actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Exact tool names that are always blocked, regardless of allowed_actions."
+    },
+    "data_scope": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "accessible": { "type": "array", "items": { "type": "string" } },
+        "prohibited": { "type": "array", "items": { "type": "string" } },
+        "pii_categories": { "type": "array", "items": { "type": "string" } }
+      },
+      "description": "Data categories the agent may/may not touch. 'prohibited' is enforced by the hard-rule pass."
+    },
+    "parameter_constraints": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "type": { "type": "string", "enum": ["float", "int"] }
+        }
+      },
+      "description": "Numeric bounds per tool-call argument name, e.g. {\"amount\": {\"min\": 0, \"max\": 5000, \"type\": \"float\"}}."
+    },
+    "ids_warn_threshold": {
+      "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,
+      "description": "IDS score at/above which a WARN + re-anchoring recovery is triggered."
+    },
+    "ids_block_threshold": {
+      "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.60,
+      "description": "IDS score at/above which the planned tool call is BLOCKed. Must be >= ids_warn_threshold."
+    },
+    "drift_velocity_threshold": {
+      "type": "number", "minimum": 0.0, "default": 0.05,
+      "description": "Step-to-step IDS delta above which a PREEMPTIVE_WARN is raised even while below ids_warn_threshold."
+    },
+    "recovery_policy": {
+      "type": "string", "default": "re-anchor",
+      "description": "Recovery strategy identifier consumed by core.recovery_engine."
+    },
+    "compliance_tags": {
+      "type": "array", "items": { "type": "string" }, "default": [],
+      "description": "Free-form compliance/regulatory tags, e.g. ['HIPAA', 'SOC2']."
+    },
+    "contract_version": {
+      "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "default": "1.0.0",
+      "description": "Semantic version of this contract instance."
+    },
+    "created_at": {
+      "type": "string", "format": "date-time",
+      "description": "ISO-8601 timestamp. Set automatically at seal time if omitted."
+    },
+    "contract_hash": {
+      "type": "string", "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex digest over every other field (sorted, canonical JSON). Present only once sealed."
+    },
+    "anchor_embedding": {
+      "type": "array", "items": { "type": "number" },
+      "description": "L2-normalised mean embedding of semantic_anchors. Present only once sealed."
+    }
+  }
+}

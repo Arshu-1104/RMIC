@@ -114,30 +114,41 @@ def _cmd_init(args: argparse.Namespace) -> int:
         print(f"error: {root} already exists and is not empty", file=sys.stderr)
         return 1
 
+    # agent_name may be given as a path ("rmic init teams/research-agent"),
+    # in which case the *directory* is the full path but the generated
+    # contract's agent_id/filename should be just the leaf component --
+    # otherwise Path("contracts") / "/abs/path.json" silently discards the
+    # "contracts/" prefix entirely (pathlib treats a leading "/" segment as
+    # an absolute-path override, not a join).
+    leaf_name = root.name or agent_name
+    if not leaf_name or any(sep in leaf_name for sep in ("/", "\\")):
+        print(f"error: {agent_name!r} does not contain a usable project name", file=sys.stderr)
+        return 1
+
     (root / "contracts").mkdir(parents=True, exist_ok=True)
     (root / "examples").mkdir(parents=True, exist_ok=True)
 
-    role_name = agent_name.replace("_", " ").replace("-", " ").title()
+    role_name = leaf_name.replace("_", " ").replace("-", " ").title()
 
     contract = dict(_CONTRACT_TEMPLATE)
-    contract["agent_id"] = agent_name
+    contract["agent_id"] = leaf_name
     contract["role_name"] = role_name
-    (root / "contracts" / f"{agent_name}.json").write_text(
+    (root / "contracts" / f"{leaf_name}.json").write_text(
         json.dumps(contract, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     (root / "examples" / "quickstart.py").write_text(
-        _QUICKSTART_TEMPLATE.format(agent_name=agent_name, role_name=role_name), encoding="utf-8"
+        _QUICKSTART_TEMPLATE.format(agent_name=leaf_name, role_name=role_name), encoding="utf-8"
     )
-    (root / "pyproject.toml").write_text(_PYPROJECT_TEMPLATE.format(agent_name=agent_name), encoding="utf-8")
-    (root / "README.md").write_text(_README_TEMPLATE.format(agent_name=agent_name), encoding="utf-8")
+    (root / "pyproject.toml").write_text(_PYPROJECT_TEMPLATE.format(agent_name=leaf_name), encoding="utf-8")
+    (root / "README.md").write_text(_README_TEMPLATE.format(agent_name=leaf_name), encoding="utf-8")
 
     print(f"Created {root}/")
-    print(f"  contracts/{agent_name}.json")
+    print(f"  contracts/{leaf_name}.json")
     print("  examples/quickstart.py")
     print("  pyproject.toml")
     print("  README.md")
     print()
-    print(f"Next: cd {agent_name} && rmic seal contracts/{agent_name}.json")
+    print(f"Next: cd {root} && rmic seal contracts/{leaf_name}.json")
     return 0
 
 

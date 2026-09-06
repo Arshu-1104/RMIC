@@ -1,0 +1,56 @@
+name: SDK tests
+
+# Runs the rmic-guard SDK test suite on every push/PR, across the Python
+# versions declared as supported in pyproject.toml (requires-python =
+# ">=3.10,<3.14"). Does NOT run experiment/, dashboard/, or baselines/ --
+# those need API keys and are exercised manually, not in CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install rmic-guard (editable, dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+      - name: Run quickstart (offline, no API key/network needed)
+        run: python examples/quickstart.py
+
+      - name: Run basic_enforcement example
+        run: python examples/basic_enforcement.py
+
+      - name: Run contract_creation example
+        run: python examples/contract_creation.py
+
+      - name: Run identity_drift example (deterministic offline backend)
+        run: python examples/identity_drift.py
+        env:
+          OFFLINE_MODE: "1"
+
+      - name: Build wheel and verify it installs cleanly
+        run: |
+          pip install build
+          python -m build --wheel
+          python -m venv /tmp/wheel_check
+          /tmp/wheel_check/bin/pip install dist/*.whl
+          /tmp/wheel_check/bin/python -c "from rmic_guard import RMICContract, EnforcementEngine, ToolRegistry; print('import OK')"
+          /tmp/wheel_check/bin/rmic --help

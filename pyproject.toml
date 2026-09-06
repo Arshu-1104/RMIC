@@ -82,7 +82,15 @@ Repository = "https://github.com/Arshu-1104/RMIC"
 packages = ["rmic_guard", "core", "utils"]
 
 [tool.setuptools.package-data]
-rmic_guard = ["py.typed"]
+# py.typed: PEP 561 marker (empty file) so type checkers treat this package
+# as typed. schema/contract.schema.json: a copy of the root-level schema,
+# shipped INSIDE the package so InvalidContractError's pointer to it
+# resolves for a `pip install rmic-guard` user too, not just someone who
+# cloned the repo. Kept in sync manually with the root schema/ copy --
+# tests/test_validation.py doesn't currently check the two are identical;
+# a `diff schema/contract.schema.json rmic_guard/schema/contract.schema.json`
+# pre-release check is the mitigation until that's automated.
+rmic_guard = ["py.typed", "schema/contract.schema.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

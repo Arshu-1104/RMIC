@@ -36,7 +36,12 @@ class InvalidContractError(RMICGuardError):
         if source:
             header += f" ({source})"
         body = "\n".join(f"  - {p}" for p in self.problems)
-        message = f"{header}:\n{body}\n\nSee schema/contract.schema.json for the full contract schema."
+        message = (
+            f"{header}:\n{body}\n\n"
+            "See the RMIC contract schema: schema/contract.schema.json in a repo clone, "
+            "or rmic_guard/schema/contract.schema.json inside an installed rmic-guard package "
+            "(https://github.com/Arshu-1104/RMIC/blob/main/schema/contract.schema.json)."
+        )
         super().__init__(message)
 
 

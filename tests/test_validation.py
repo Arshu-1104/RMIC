@@ -189,3 +189,23 @@ def test_error_message_lists_every_problem_not_just_first() -> None:
     assert len(exc_info.value.problems) >= 4
     text = str(exc_info.value)
     assert "agent_id" in text and "role_name" in text and "sector" in text and "semantic_anchors" in text
+
+
+def test_packaged_schema_copy_matches_repo_root_schema() -> None:
+    """rmic_guard/schema/contract.schema.json (shipped inside the installed
+    package) must stay byte-identical to schema/contract.schema.json (the
+    repo-root copy referenced by README/docs) -- see the comment on
+    [tool.setuptools.package-data] in pyproject.toml. This test is the
+    automated half of that sync; it fails loudly if someone edits one copy
+    and forgets the other."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    root_copy = repo_root / "schema" / "contract.schema.json"
+    packaged_copy = repo_root / "rmic_guard" / "schema" / "contract.schema.json"
+    assert root_copy.exists(), f"missing {root_copy}"
+    assert packaged_copy.exists(), f"missing {packaged_copy} -- see pyproject.toml package-data"
+    assert root_copy.read_text(encoding="utf-8") == packaged_copy.read_text(encoding="utf-8"), (
+        "schema/contract.schema.json and rmic_guard/schema/contract.schema.json have drifted -- "
+        "copy one over the other so pip-installed users and repo-clone users see the same schema."
+    )
