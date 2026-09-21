@@ -59,7 +59,7 @@ class TestUnsealedContract:
             "semantic_anchors": ["I do research."],
         }))
         with pytest.raises(ContractNotSealedError):
-            load_contract(unsealed, verify_hash=True)
+            load_contract(unsealed, verify_hash=True, auto_seal=False)
 
     def test_load_unsealed_contract_without_verify_hash_succeeds(self, tmp_path: Path) -> None:
         unsealed = tmp_path / "unsealed.json"
@@ -67,7 +67,7 @@ class TestUnsealedContract:
             "agent_id": "a", "role_name": "A", "sector": "s",
             "semantic_anchors": ["I do research."],
         }))
-        loaded = load_contract(unsealed, verify_hash=False)
+        loaded = load_contract(unsealed, verify_hash=False, auto_seal=False)
         assert loaded.agent_id == "a"
         assert loaded.anchor_embedding == ()
 
@@ -87,3 +87,43 @@ class TestHashComputation:
         a = {"agent_id": "a", "role_name": "A"}
         b = {"agent_id": "a", "role_name": "B"}
         assert compute_contract_hash(a) != compute_contract_hash(b)
+
+
+    def test_load_unsealed_contract_with_auto_seal_seals_and_loads(self, tmp_path: Path) -> None:
+        unsealed = tmp_path / "auto_sealed.json"
+        unsealed.write_text(json.dumps({
+            "agent_id": "a", "role_name": "A", "sector": "s",
+            "semantic_anchors": ["I do research."],
+        }))
+
+        loaded = load_contract(unsealed, auto_seal=True)
+
+        assert loaded.agent_id == "a"
+        assert loaded.contract_hash
+        assert loaded.anchor_embedding
+
+        data = json.loads(unsealed.read_text())
+        assert data["contract_hash"] == loaded.contract_hash
+        assert "anchor_embedding" in data
+        assert verify_contract(unsealed) is True
+
+
+    def test_load_unsealed_contract_seals_by_default(self, tmp_path: Path) -> None:
+        unsealed = tmp_path / "default_auto_sealed.json"
+        unsealed.write_text(json.dumps({
+            "agent_id": "a",
+            "role_name": "A",
+            "sector": "s",
+            "semantic_anchors": ["I do research."],
+        }))
+
+        loaded = load_contract(unsealed)
+
+        assert loaded.agent_id == "a"
+        assert loaded.contract_hash
+        assert loaded.anchor_embedding
+
+        data = json.loads(unsealed.read_text())
+        assert data["contract_hash"] == loaded.contract_hash
+        assert "anchor_embedding" in data
+        assert verify_contract(unsealed) is True
