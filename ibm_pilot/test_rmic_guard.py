@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 
 import pytest
-
+from core.exceptions import ContractIntegrityError
 from core.audit_ledger import AuditLedger
 from core.tool_layer import ToolRegistry
 
@@ -132,7 +132,7 @@ class TestMissingContract:
         tampered_path = tmp_path / "tampered_financial_agent.json"
         tampered_path.write_text(json.dumps(data), encoding="utf-8")
 
-        with pytest.raises(ValueError, match="contract_hash mismatch"):
+        with pytest.raises(ContractIntegrityError, match="contract_hash mismatch"):
             RMICGuardTool(
                 contract_path=str(tampered_path),
                 audit_log_path=str(tmp_path / "audit.jsonl"),

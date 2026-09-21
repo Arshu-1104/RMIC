@@ -153,7 +153,7 @@ def _outcome_to_ibm_response(
     everything else (BLOCK, WARN, NEEDS_RECOVERY) is treated as not allowed,
     since EnforcementEngine only executes the tool for PASS/PREEMPTIVE_WARN.
     """
-    allowed = outcome.decision in ("PASS", "PREEMPTIVE_WARN", "WARN", "NEEDS_RECOVERY")
+    allowed = outcome.decision in ("PASS", "PREEMPTIVE_WARN")
     decision = "ALLOW" if allowed else "BLOCK"
 
     if outcome.hard_rule_violation:
