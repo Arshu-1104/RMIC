@@ -118,10 +118,6 @@ def _ids_on_plan(
     text_for_ids = f"{plan.tool_name} {plan.arguments} {plan.raw_text}"
     allowed_topics = list(contract.semantic_anchors)
     forbidden_topics: list[str] = []
-    if contract.data_scope.prohibited:
-        forbidden_topics.extend(contract.data_scope.prohibited)
-    if contract.forbidden_actions:
-        forbidden_topics.extend(contract.forbidden_actions)
     components = IDSEngine().score(
         text_for_ids,
         anchor_embedding=contract.anchor_embedding,

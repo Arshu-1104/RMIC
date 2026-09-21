@@ -227,15 +227,29 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
     )
 
 
-def load_contract(path: str | Path, *, verify_hash: bool = True) -> RMICContract:
-    """Load a contract JSON file, validate it, and optionally verify SHA-256 integrity."""
+def load_contract(
+    path: str | Path,
+    *,
+    verify_hash: bool = True,
+    auto_seal: bool = True,
+) -> RMICContract:
+    """Load a contract JSON file.
+
+    When ``auto_seal=True``, an unsealed contract is automatically sealed
+    before loading. Existing sealed contracts are still integrity-verified.
+    """
     p = Path(path)
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise InvalidContractError([f"file is not valid JSON: {exc}"], source=str(p)) from exc
+
     if not isinstance(raw, dict):
         raise InvalidContractError(["contract file must contain a JSON object"], source=str(p))
+
+    if auto_seal and not raw.get("contract_hash"):
+        return seal_contract_file(p, write_back=True)
+
     return _contract_from_dict(raw, require_hash_match=verify_hash, source=str(p))
 
 
