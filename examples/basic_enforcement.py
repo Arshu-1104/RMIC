@@ -7,8 +7,7 @@ constraint, and a data-scope restriction -- still fully offline
 
 from __future__ import annotations
 
-from rmic_guard._core.planning import PlannedToolCall
-from rmic_guard import EnforcementEngine, RMICContract, ToolRegistry
+from rmic_guard import EnforcementEngine, PlannedToolCall, RMICContract, ToolRegistry
 
 
 def main() -> None:

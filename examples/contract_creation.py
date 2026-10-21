@@ -10,8 +10,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from rmic_guard._core.contract_loader import load_contract, seal_contract_file
-from rmic_guard import InvalidContractError, RMICContract
+from rmic_guard import InvalidContractError, RMICContract, load_contract, seal_contract_file
 
 
 def beginner_api() -> None:
