@@ -44,12 +44,13 @@ Only the following verified files and directories are part of this pilot and its
 
 ```
 RMIC/
-├── core/
-│ ├── enforcement_engine.py
-│ ├── contract_loader.py
-│ ├── audit_ledger.py
-│ ├── reasoning_layer.py
-│ └── tool_layer.py
+├── rmic_guard/
+│ └── _core/
+│   ├── enforcement_engine.py
+│   ├── contract_loader.py
+│   ├── audit_ledger.py
+│   ├── reasoning_layer.py
+│   └── tool_layer.py
 │
 ├── contracts/
 │ └── financial_agent.json
@@ -63,7 +64,6 @@ RMIC/
 │
 ├── dashboard/
 ├── experiment/
-├── utils/
 │
 ├── config.yaml
 ├── pyproject.toml
@@ -224,6 +224,6 @@ differences from this local pilot, and results are in
 [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md).
 
 Remaining future work: replacing the sandbox-inlined rule check with
-the full `core/` enforcement engine running as an installable package
+the full `rmic_guard` enforcement engine running as an installable package
 (see `LIVE_DEPLOYMENT.md`'s "Option B" discussion), and adding
 persistent audit storage for the live deployment.
