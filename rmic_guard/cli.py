@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 
+from rmic_guard._core.contract_loader import _seal_dict
 from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
 from rmic_guard._core.validation import validate_contract_dict
 
@@ -81,14 +82,17 @@ pip install -e .
 python examples/quickstart.py
 ```
 
-Edit `contracts/{agent_name}.json` to define the agent's semantic anchors,
-allowed/forbidden tools, and data scope. `Guard` seals an unsealed contract
-in memory on load; to persist the seal (so later edits to the file are
-detected as tampering), run:
+`contracts/{agent_name}.json` was sealed by `rmic init` (contract_hash only, no
+embedding, so it works offline with the default hard-rules-only `Guard`). Any edit
+to the file is then detected as tampering (`ContractIntegrityError`): after editing
+its semantic anchors, allowed/forbidden tools or data scope, re-seal it with
 
 ```bash
 rmic seal contracts/{agent_name}.json
 ```
+
+`rmic seal` also computes the anchor embedding that `Guard(..., semantic=True)` needs
+(it downloads a small local embedding model once).
 """
 
 
@@ -118,8 +122,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
     contract = dict(_CONTRACT_TEMPLATE)
     contract["agent_id"] = leaf_name
     contract["role_name"] = role_name
+    # Seal now so the generated quickstart loads a sealed contract (no
+    # in-memory sealing warning). Hash only: no embedding model download.
+    sealed = _seal_dict(contract, source="rmic init", require_embedding=False, stamp_created_at=True)
     (root / "contracts" / f"{leaf_name}.json").write_text(
-        json.dumps(contract, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(sealed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     (root / "examples" / "quickstart.py").write_text(
         _QUICKSTART_TEMPLATE.format(agent_name=leaf_name, role_name=role_name), encoding="utf-8"
@@ -128,7 +135,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     (root / "README.md").write_text(_README_TEMPLATE.format(agent_name=leaf_name), encoding="utf-8")
 
     print(f"Created {root}/")
-    print(f"  contracts/{leaf_name}.json")
+    print(f"  contracts/{leaf_name}.json  (sealed; re-seal with `rmic seal` after editing)")
     print("  examples/quickstart.py")
     print("  pyproject.toml")
     print("  README.md")

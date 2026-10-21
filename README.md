@@ -246,7 +246,7 @@ reasoning = GroqReasoning(model_name="groq/llama-3.3-70b-versatile")
 ### CLI
 
 ```bash
-rmic init research-agent        # scaffold a new agent project (contract + quickstart)
+rmic init research-agent        # scaffold a new agent project (sealed contract + quickstart)
 rmic validate contract.json     # check a contract against the schema, no sealing
 rmic seal contract.json         # compute anchor_embedding + contract_hash, write back to the file
 rmic verify contract.json       # check a sealed contract's hash is still intact

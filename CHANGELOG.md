@@ -55,6 +55,9 @@ All notable changes to `rmic-guard` are documented here.
 
 ### Changed
 
+- `rmic init` seals the scaffolded contract (hash only, offline; `rmic seal` adds the
+  embedding), so the generated quickstart loads a sealed contract without a warning.
+  `examples/quickstart.py` uses the bundled sealed `financial_agent` contract.
 - **In-memory sealing no longer stamps `created_at`** (`load_contract` auto-seal and
   `seal_contract_file` without `write_back`, `Guard` with a path or dict). Loading the same
   unsealed contract twice now gives the same hash (previously the current time made every load
