@@ -8,6 +8,7 @@ import numpy as np
 from scipy.stats import wasserstein_distance
 from scipy.special import softmax
 
+from rmic_guard._core import embedder as _embedder
 from rmic_guard._core.embedder import cosine_similarity, embed_texts, normalise_l2
 from rmic_guard._utils.config import load_config
 
@@ -67,13 +68,15 @@ def role_distance(
     agent_output: str,
     anchor_embedding: Sequence[float] | np.ndarray,
     model_name: str | None = None,
+    *,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     Role_Distance = 1 - cosine_sim(embed(agent_output), anchor_centroid).
     anchor_embedding must be the sealed centroid from the contract.
     """
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
     sim = cosine_similarity(out, anchor)
     return float(max(0.0, min(1.0, 1.0 - sim)))
 
@@ -83,17 +86,19 @@ def semantic_grounding(
     allowed_topics: Sequence[str],
     forbidden_topics: Sequence[str],
     model_name: str | None = None,
+    *,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     Semantic_Grounding = 1 - (sim(output, allowed_topics) - sim(output, forbidden_topics)),
     each group similarity = max cosine sim to any phrase in the group.
     """
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
 
     def _max_sim(phrases: Sequence[str]) -> float:
-        if not phrases:
+        vecs = _topic_embeddings(phrases, model_name=model_name)
+        if vecs is None:
             return 0.0
-        vecs = embed_texts(list(phrases), model_name=model_name)
         sims = vecs @ out
         return float(np.max(sims))
 
@@ -121,9 +126,32 @@ def trajectory_curvature(recent_ids: Sequence[float]) -> float:
 
 from functools import lru_cache
 
+# Embedding cache for IDS scoring. Two parts, both value-preserving:
+#   1. compute_ids_components() embeds the scored text once and hands the
+#      vector to every signal (they used to embed it 7 times per call);
+#   2. topic phrase sets (a contract's semantic anchors, forbidden topics and
+#      their concatenation) are embedded once per set and reused, each set as
+#      the same single batch as before, so values are identical by construction.
+# Keyed on the embedding backend generation, so set_embedding_backend()
+# invalidates it. set_ids_embedding_cache(False) restores the uncached path.
+_CACHE_ENABLED = True
 
-@lru_cache(maxsize=64)
-def _topic_embeddings_cached(topics: tuple[str, ...], model_name: str | None) -> np.ndarray:
+
+def set_ids_embedding_cache(enabled: bool) -> None:
+    """Turn the IDS embedding cache on (default) or off; turning it off also clears it."""
+    global _CACHE_ENABLED
+    _CACHE_ENABLED = bool(enabled)
+    if not _CACHE_ENABLED:
+        _topic_embeddings_cached.cache_clear()
+
+
+def clear_ids_embedding_cache() -> None:
+    _topic_embeddings_cached.cache_clear()
+
+
+@lru_cache(maxsize=256)
+def _topic_embeddings_cached(topics: tuple[str, ...], model_name: str | None, generation: int) -> np.ndarray:
+    del generation  # cache key only
     vecs = embed_texts(list(topics), model_name=model_name)
     return np.asarray(vecs, dtype=np.float32)
 
@@ -131,10 +159,15 @@ def _topic_embeddings_cached(topics: tuple[str, ...], model_name: str | None) ->
 def _topic_embeddings(topics: Sequence[str], model_name: str | None = None) -> np.ndarray | None:
     if not topics:
         return None
-    # FIXED: topic phrase sets repeat identically across every row for a
-    # given role (same allowed/forbidden topics each time) -- caching avoids
-    # re-embedding the same handful of phrases on every single call.
-    return _topic_embeddings_cached(tuple(topics), model_name)
+    if not _CACHE_ENABLED:
+        return np.asarray(embed_texts(list(topics), model_name=model_name), dtype=np.float32)
+    return _topic_embeddings_cached(tuple(topics), model_name, _embedder.backend_generation())
+
+
+def _query_vector(agent_output: str, model_name: str | None, query_embedding: np.ndarray | None) -> np.ndarray:
+    if query_embedding is not None:
+        return query_embedding
+    return embedding_for_text(agent_output, model_name=model_name)
 
 
 def _topic_distribution(
@@ -159,13 +192,14 @@ def mahalanobis_drift(
     allowed_topics: Sequence[str] | None = None,
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     Mahalanobis drift between output embedding and anchor centroid.
     Topic embeddings provide an empirical covariance estimate.
     """
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
 
     topics = tuple(allowed_topics or ()) + tuple(forbidden_topics or ())
     topic_vecs = _topic_embeddings(topics, model_name=model_name)
@@ -204,6 +238,7 @@ def kl_divergence_drift(
     allowed_topics: Sequence[str] | None = None,
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     KL divergence between output topic distribution and anchor-induced topic distribution.
@@ -214,7 +249,7 @@ def kl_divergence_drift(
     if topic_vecs is None or topic_vecs.shape[0] == 0:
         return 0.0
 
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
     p = _topic_distribution(out, topic_vecs) + EPS
     q = _topic_distribution(anchor, topic_vecs) + EPS
@@ -232,6 +267,7 @@ def jensen_shannon_drift(
     allowed_topics: Sequence[str] | None = None,
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     Jensen-Shannon divergence between output and anchor topic distributions.
@@ -242,7 +278,7 @@ def jensen_shannon_drift(
     if topic_vecs is None or topic_vecs.shape[0] == 0:
         return 0.0
 
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
     p = _topic_distribution(out, topic_vecs) + EPS
     q = _topic_distribution(anchor, topic_vecs) + EPS
@@ -263,6 +299,7 @@ def wasserstein_drift(
     allowed_topics: Sequence[str] | None = None,
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     """
     FIXED: the original implementation ran a 1D Wasserstein distance over
@@ -282,7 +319,7 @@ def wasserstein_drift(
     topic_vecs = _topic_embeddings(topics, model_name=model_name)
     if topic_vecs is None or topic_vecs.shape[0] == 0:
         return 0.0
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
     p = _topic_distribution(out, topic_vecs)
     q = _topic_distribution(anchor, topic_vecs)
@@ -305,12 +342,13 @@ def hellinger_drift(
     allowed_topics: Sequence[str] | None = None,
     forbidden_topics: Sequence[str] | None = None,
     model_name: str | None = None,
+    query_embedding: np.ndarray | None = None,
 ) -> float:
     topics = tuple(allowed_topics or ()) + tuple(forbidden_topics or ())
     topic_vecs = _topic_embeddings(topics, model_name=model_name)
     if topic_vecs is None or topic_vecs.shape[0] == 0:
         return 0.0
-    out = embedding_for_text(agent_output, model_name=model_name)
+    out = _query_vector(agent_output, model_name, query_embedding)
     anchor = normalise_l2(np.asarray(list(anchor_embedding), dtype=np.float32))
     p = _topic_distribution(out, topic_vecs) + EPS
     q = _topic_distribution(anchor, topic_vecs) + EPS
@@ -346,9 +384,10 @@ def compute_ids_components(
     """Return base IDS and three independent statistical scores in [0, 1]."""
     allowed = tuple(allowed_topics or ())
     forbidden = tuple(forbidden_topics or ())
+    query = embedding_for_text(agent_output, model_name=model_name) if _CACHE_ENABLED else None
 
-    rd = role_distance(agent_output, anchor_embedding, model_name=model_name)
-    sg = semantic_grounding(agent_output, allowed, forbidden, model_name=model_name)
+    rd = role_distance(agent_output, anchor_embedding, model_name=model_name, query_embedding=query)
+    sg = semantic_grounding(agent_output, allowed, forbidden, model_name=model_name, query_embedding=query)
     tc = trajectory_curvature(recent_ids or ())
     wr, ws, wt = _ids_weights()
     mode = _ids_mode()
@@ -367,6 +406,7 @@ def compute_ids_components(
         allowed_topics=allowed,
         forbidden_topics=forbidden,
         model_name=model_name,
+        query_embedding=query,
     )
     kl = kl_divergence_drift(
         agent_output,
@@ -374,6 +414,7 @@ def compute_ids_components(
         allowed_topics=allowed,
         forbidden_topics=forbidden,
         model_name=model_name,
+        query_embedding=query,
     )
     js = jensen_shannon_drift(
         agent_output,
@@ -381,6 +422,7 @@ def compute_ids_components(
         allowed_topics=allowed,
         forbidden_topics=forbidden,
         model_name=model_name,
+        query_embedding=query,
     )
     wasserstein = wasserstein_drift(
         agent_output,
@@ -388,6 +430,7 @@ def compute_ids_components(
         allowed_topics=allowed,
         forbidden_topics=forbidden,
         model_name=model_name,
+        query_embedding=query,
     )
     hellinger = hellinger_drift(
         agent_output,
@@ -395,6 +438,7 @@ def compute_ids_components(
         allowed_topics=allowed,
         forbidden_topics=forbidden,
         model_name=model_name,
+        query_embedding=query,
     )
     tf = tool_frequency_drift(
         tool_call_history=list(tool_call_history or []),
