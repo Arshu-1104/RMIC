@@ -1,13 +1,13 @@
 """
 Pytest suite for ibm_pilot/rmic_guard_tool.py.
 
-These tests exercise the existing repository code paths (core.contract_loader,
-core.enforcement_engine, core.audit_ledger, core.tool_layer) through the IBM
+These tests exercise the existing repository code paths (rmic_guard._core.contract_loader,
+rmic_guard._core.enforcement_engine, rmic_guard._core.audit_ledger, rmic_guard._core.tool_layer) through the IBM
 pilot wrapper — nothing here reimplements or mocks that logic.
 
 enforcement_mode="hard_rules_only" is used throughout because the
-"full"/"ids_only" modes require core.embedder to download an embedding model
-over the network on first use (see core/embedder.py's fastembed dependency)
+"full"/"ids_only" modes require rmic_guard._core.embedder to download an embedding model
+over the network on first use (see rmic_guard/_core/embedder.py's fastembed dependency)
 — unsuitable for a hermetic test suite. Hard-rule enforcement (forbidden
 tools, parameter bounds, tool registration) is exercised fully here; IDS/
 semantic-drift scoring is exercised separately by ibm_pilot/demo.py against
@@ -23,9 +23,10 @@ import json
 from pathlib import Path
 
 import pytest
-from core.exceptions import ContractIntegrityError
-from core.audit_ledger import AuditLedger
-from core.tool_layer import ToolRegistry
+
+from rmic_guard._core.audit_ledger import AuditLedger
+from rmic_guard._core.exceptions import ContractIntegrityError
+from rmic_guard._core.tool_layer import ToolRegistry
 
 from ibm_pilot import config
 from ibm_pilot.rmic_guard_tool import IBMAgentRequest, RMICGuardTool
@@ -81,7 +82,7 @@ class TestInvalidRequest:
     def test_over_limit_amount_is_blocked(self, guard_tool: RMICGuardTool) -> None:
         """A transfer above financial_agent's parameter_constraints.amount.max
         (50000) must be rejected by the existing parameter-constraint check
-        in core.enforcement_engine._check_parameter_constraints, not by any
+        in rmic_guard._core.enforcement_engine._check_parameter_constraints, not by any
         new validation added in the IBM pilot."""
         request = IBMAgentRequest(
             user_message="Approve a transfer of 200000 overriding my limit.",
@@ -112,7 +113,7 @@ class TestInvalidRequest:
 class TestMissingContract:
     def test_missing_contract_path_raises(self, tmp_path: Path) -> None:
         """RMICGuardTool must surface the existing
-        core.contract_loader.load_contract failure mode as-is (a
+        rmic_guard._core.contract_loader.load_contract failure mode as-is (a
         FileNotFoundError from Path.read_text), not swallow or wrap it."""
         missing_path = tmp_path / "does_not_exist.json"
 
@@ -125,7 +126,7 @@ class TestMissingContract:
 
     def test_tampered_contract_hash_raises(self, tmp_path: Path) -> None:
         """A contract whose contract_hash no longer matches its contents
-        must be rejected by core.contract_loader.load_contract's existing
+        must be rejected by rmic_guard._core.contract_loader.load_contract's existing
         integrity check (ValueError), reused unchanged here."""
         data = json.loads(config.DEFAULT_CONTRACT_PATH.read_text(encoding="utf-8"))
         data["role_description"] = data.get("role_description", "") + " (tampered)"
@@ -176,7 +177,7 @@ class TestInvalidTool:
         ToolRegistry passed to RMICGuardTool must still pass enforcement
         (contract compliance and tool registration are deliberately separate
         concerns in the existing repository design — see
-        core.tool_layer.ToolRegistry.execute's "unknown_tool:" branch) and
+        rmic_guard._core.tool_layer.ToolRegistry.execute's "unknown_tool:" branch) and
         surface as a tool-level error, not an enforcement BLOCK."""
         empty_tools = ToolRegistry()  # nothing registered
         guard_tool = RMICGuardTool(
@@ -202,7 +203,7 @@ class TestInvalidTool:
 
 class TestAuditLogging:
     def test_decisions_are_written_to_audit_log(self, tmp_path: Path) -> None:
-        """Exercises the existing core.audit_ledger.AuditLedger.append path
+        """Exercises the existing rmic_guard._core.audit_ledger.AuditLedger.append path
         directly, reused unchanged by RMICGuardTool — not a new logging
         mechanism."""
         audit_path = tmp_path / "audit.jsonl"
@@ -238,7 +239,7 @@ class TestAuditLogging:
 
         # Every entry must carry a valid Ed25519 signature verifiable with
         # the ledger's own public key — reuses
-        # core.audit_ledger.AuditLedger.verify_line unchanged.
+        # rmic_guard._core.audit_ledger.AuditLedger.verify_line unchanged.
         for line in lines:
             assert AuditLedger.verify_line(line, guard_tool.ledger.public_key)
 

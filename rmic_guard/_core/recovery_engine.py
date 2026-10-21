@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.contract_loader import RMICContract
+from rmic_guard._core.contract_loader import RMICContract
 
 __all__ = ["reanchoring_system_message", "reanchoring_user_nudge"]
 

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from core.contract_loader import RMICContract, compute_contract_hash, load_contract, verify_contract
-from core.exceptions import ContractIntegrityError, ContractNotSealedError
+from rmic_guard._core.contract_loader import RMICContract, compute_contract_hash, load_contract, verify_contract
+from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError
 
 
 def _write_sealed_contract(tmp_path: Path) -> Path:
@@ -89,24 +89,21 @@ class TestHashComputation:
         assert compute_contract_hash(a) != compute_contract_hash(b)
 
 
-    def test_load_unsealed_contract_with_auto_seal_seals_and_loads(self, tmp_path: Path) -> None:
+    def test_load_unsealed_contract_with_auto_seal_seals_in_memory(self, tmp_path: Path) -> None:
         unsealed = tmp_path / "auto_sealed.json"
         unsealed.write_text(json.dumps({
             "agent_id": "a", "role_name": "A", "sector": "s",
             "semantic_anchors": ["I do research."],
         }))
+        before = unsealed.read_text()
 
         loaded = load_contract(unsealed, auto_seal=True)
 
         assert loaded.agent_id == "a"
         assert loaded.contract_hash
         assert loaded.anchor_embedding
-
-        data = json.loads(unsealed.read_text())
-        assert data["contract_hash"] == loaded.contract_hash
-        assert "anchor_embedding" in data
-        assert verify_contract(unsealed) is True
-
+        # write_back defaults to False (v0.3.0): the file on disk is untouched.
+        assert unsealed.read_text() == before
 
     def test_load_unsealed_contract_seals_by_default(self, tmp_path: Path) -> None:
         unsealed = tmp_path / "default_auto_sealed.json"
@@ -116,12 +113,23 @@ class TestHashComputation:
             "sector": "s",
             "semantic_anchors": ["I do research."],
         }))
+        before = unsealed.read_text()
 
         loaded = load_contract(unsealed)
 
         assert loaded.agent_id == "a"
         assert loaded.contract_hash
         assert loaded.anchor_embedding
+        assert unsealed.read_text() == before
+
+    def test_load_unsealed_contract_auto_seal_write_back_persists(self, tmp_path: Path) -> None:
+        unsealed = tmp_path / "written_back.json"
+        unsealed.write_text(json.dumps({
+            "agent_id": "a", "role_name": "A", "sector": "s",
+            "semantic_anchors": ["I do research."],
+        }))
+
+        loaded = load_contract(unsealed, auto_seal=True, write_back=True)
 
         data = json.loads(unsealed.read_text())
         assert data["contract_hash"] == loaded.contract_hash

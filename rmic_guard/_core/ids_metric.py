@@ -8,8 +8,8 @@ import numpy as np
 from scipy.stats import wasserstein_distance
 from scipy.special import softmax
 
-from core.embedder import cosine_similarity, embed_texts, normalise_l2
-from utils.config import load_config
+from rmic_guard._core.embedder import cosine_similarity, embed_texts, normalise_l2
+from rmic_guard._utils.config import load_config
 
 __all__ = [
     "compute_ids",

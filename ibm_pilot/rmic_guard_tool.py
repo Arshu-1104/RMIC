@@ -5,12 +5,12 @@ This module does NOT reimplement enforcement, contract loading, or audit
 logging. It only adapts between two shapes:
 
     IBM watsonx Orchestrate agent request
-        -> core.reasoning_layer.PlannedToolCall   (existing dataclass, reused)
-        -> core.enforcement_engine.EnforcementEngine.evaluate_and_maybe_execute
-        -> core.enforcement_engine.EnforcementOutcome
+        -> rmic_guard._core.reasoning_layer.PlannedToolCall   (existing dataclass, reused)
+        -> rmic_guard._core.enforcement_engine.EnforcementEngine.evaluate_and_maybe_execute
+        -> rmic_guard._core.enforcement_engine.EnforcementOutcome
         -> IBMToolResponse                         (structured ALLOW/BLOCK)
 
-Everything under core/ (EnforcementEngine, RMICContract, AuditLedger,
+Everything under rmic_guard/_core/ (EnforcementEngine, RMICContract, AuditLedger,
 ToolRegistry) is imported and used exactly as it exists in the repository.
 
 Run from the repository root:
@@ -21,11 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.audit_ledger import AuditLedger
-from core.contract_loader import RMICContract, load_contract
-from core.enforcement_engine import EnforcementEngine, EnforcementMode, EnforcementOutcome
-from core.reasoning_layer import PlannedToolCall
-from core.tool_layer import ToolRegistry
+from rmic_guard._core.audit_ledger import AuditLedger
+from rmic_guard._core.contract_loader import RMICContract, load_contract
+from rmic_guard._core.enforcement_engine import EnforcementEngine, EnforcementMode, EnforcementOutcome
+from rmic_guard._core.reasoning_layer import PlannedToolCall
+from rmic_guard._core.tool_layer import ToolRegistry
 
 from ibm_pilot import config
 
@@ -53,7 +53,7 @@ class IBMAgentRequest:
     Attributes:
         user_message: The original end-user text. Kept verbatim because the
             IDS engine scores semantic drift against this text, not against
-            the tool_name/arguments alone (see core.enforcement_engine._ids_on_plan).
+            the tool_name/arguments alone (see rmic_guard._core.enforcement_engine._ids_on_plan).
         tool_name: The business tool the Orchestrate agent has selected.
         arguments: Arguments the Orchestrate agent wants to pass to that tool.
         data_categories_accessed: Data categories the Orchestrate agent
@@ -118,7 +118,7 @@ def _to_planned_tool_call(request: IBMAgentRequest) -> PlannedToolCall:
     """Adapt an IBMAgentRequest into the existing PlannedToolCall dataclass.
 
     No new "plan" dataclass is introduced — this reuses
-    core.reasoning_layer.PlannedToolCall exactly as EnforcementEngine expects it.
+    rmic_guard._core.reasoning_layer.PlannedToolCall exactly as EnforcementEngine expects it.
     """
 
     tool_aliases = {
@@ -201,7 +201,7 @@ def build_default_tool_registry() -> ToolRegistry:
     """Build a ToolRegistry pre-populated with stub business tools for every
     allowed_action in the financial_agent contract (config.DEFAULT_CONTRACT_PATH).
 
-    Uses core.tool_layer.ToolRegistry exactly as defined in the repository —
+    Uses rmic_guard._core.tool_layer.ToolRegistry exactly as defined in the repository —
     no subclassing, no new registry type.
     """
     registry = ToolRegistry()
@@ -224,9 +224,9 @@ class RMICGuardTool:
     RMIC-Guard enforcement pipeline.
 
     This class holds no enforcement logic of its own. Construction loads an
-    existing sealed contract with core.contract_loader.load_contract, opens
-    the existing core.audit_ledger.AuditLedger at the configured path, and
-    builds one core.enforcement_engine.EnforcementEngine — the same three
+    existing sealed contract with rmic_guard._core.contract_loader.load_contract, opens
+    the existing rmic_guard._core.audit_ledger.AuditLedger at the configured path, and
+    builds one rmic_guard._core.enforcement_engine.EnforcementEngine — the same three
     calls demo.py and examples/quickstart.py already make. handle_request()
     only adapts shapes; evaluate_and_maybe_execute() does the actual work.
     """

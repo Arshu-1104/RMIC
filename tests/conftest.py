@@ -2,7 +2,7 @@
 
 Tests never hit a real embedding model or network — a deterministic,
 content-sensitive fake embedding backend is installed for the whole
-session via core.embedder.set_embedding_backend(). It is NOT a stand-in
+session via rmic_guard._core.embedder.set_embedding_backend(). It is NOT a stand-in
 for the real semantic model's quality; it only needs to be internally
 consistent (same text -> same vector, similar text -> similar vector)
 so that role_distance / semantic_grounding behave sensibly enough to
@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.embedder import set_embedding_backend
+from rmic_guard._core.embedder import set_embedding_backend
 
 _DIM = 64
 

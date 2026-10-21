@@ -25,8 +25,8 @@ import argparse
 import json
 from pathlib import Path
 
-from core.enforcement_engine import EnforcementEngine
-from core.reasoning_layer import ClaudeReasoning, GroqReasoning
+from rmic_guard._core.enforcement_engine import EnforcementEngine
+from rmic_guard._core.reasoning_layer import ClaudeReasoning, GroqReasoning
 from experiment.runner import load_contract
 
 

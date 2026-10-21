@@ -1,4 +1,4 @@
-from core.contract_loader import seal_contract_file, load_contract
+from rmic_guard._core.contract_loader import seal_contract_file, load_contract
 from ibm_pilot.rmic_guard_tool import RMICGuardTool, IBMAgentRequest
 from ibm_pilot import config
 

@@ -16,7 +16,7 @@ CONTRACT_RELPATHS = (
 
 
 def compute_contract_hash(data: dict) -> str:
-    """SHA-256 over stable JSON of all fields except contract_hash (matches core.contract_loader)."""
+    """SHA-256 over stable JSON of all fields except contract_hash (matches rmic_guard._core.contract_loader)."""
     payload = {k: v for k, v in sorted(data.items()) if k != "contract_hash"}
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
@@ -55,14 +55,14 @@ def main() -> None:
     be = _embedding_backend_label()
 
     try:
-        from core.contract_loader import seal_contract_file
+        from rmic_guard._core.contract_loader import seal_contract_file
     except ImportError:
         seal_contract_file = None
 
     for p in paths:
         if seal_contract_file is not None:
             try:
-                sealed = seal_contract_file(p)
+                sealed = seal_contract_file(p, write_back=True)
                 print(
                     f"Sealed (real embeddings via {be}): {sealed.agent_id}: "
                     f"{sealed.contract_hash[:16]}..."

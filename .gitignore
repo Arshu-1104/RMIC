@@ -9,3 +9,6 @@ project_files.txt
 data/
 dist/
 rmic_guard.egg-info/
+
+# RMIC audit-ledger signing keys (generated next to logs as <log>.key)
+*.key

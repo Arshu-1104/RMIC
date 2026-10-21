@@ -34,33 +34,45 @@ pip install "rmic-guard[groq]"        # Groq/Llama, via LiteLLM
 pip install "rmic-guard[llm]"         # both
 ```
 
-### Beginner API — no contract-hashing/embedding internals required
+### Quickstart — one object, one call
 
 ```python
-from rmic_guard import RMICContract, ToolRegistry, EnforcementEngine
-from core.planning import PlannedToolCall
+from rmic_guard import Guard
 
-contract = RMICContract.create(
-    agent_id="research-agent",
-    role_name="Research Agent",
-    sector="research",
-    semantic_anchors=[
-        "I perform research and information gathering.",
-        "I do not perform destructive or unauthorized actions.",
-    ],
-    allowed_actions=["web_search"],
-    forbidden_actions=["delete_data"],
-)
+guard = Guard("contracts/bank_bot.json")        # load + validate + seal + verify
 
-tools = ToolRegistry()
-tools.register("web_search", lambda query: {"results": [f"Search results for: {query}"]})
+@guard.tool
+def transfer_funds(amount: float, to: str):
+    return {"sent": amount, "to": to}
 
-engine = EnforcementEngine(contract=contract, tools=tools)
-outcome = engine.evaluate_and_maybe_execute(
-    PlannedToolCall("web_search", {"query": "hello"}, "hello"), recent_ids=[],
-)
-print(outcome.decision)  # "PASS" | "WARN" | "BLOCK" | "NEEDS_RECOVERY" | "PREEMPTIVE_WARN"
+result = guard.check("transfer_funds", amount=500, to="4321", message="pay rent")
+print(result.allowed, result.decision, result.reason, result.output)
+
+# Let an LLM plan the call (pip install "rmic-guard[groq]"):
+result = guard.run("Transfer $500 to 4321 for rent", llm="groq/llama-3.3-70b-versatile")
 ```
+
+`Guard` seals an unsealed contract in memory (the file is only rewritten with
+`save_sealed=True`), verifies a sealed one (`ContractIntegrityError` on tampering),
+keeps per-session IDS / tool-call history for you (`guard.reset()`,
+`guard.session("user-42")`), executes the tool only on `PASS` / `PREEMPTIVE_WARN`,
+and on `NEEDS_RECOVERY` in `run()` re-plans once with re-anchoring instructions.
+`Guard(..., audit_log="audit.jsonl")` writes every decision to an Ed25519-signed
+log that `guard.verify_log()` checks (each line is hash-chained to the previous one, so
+deleted or reordered lines are detected too).
+
+> **Semantic mode is experimental and off by default.** `Guard` enforces the
+> contract's hard rules (forbidden tools, parameter bounds, data scope) unless you pass
+> `semantic=True`. On the current scoring, the semantic identity-drift score (IDS) does
+> not separate attacks from legitimate requests: across the 4 bundled contracts, attacks
+> score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
+> catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
+> [calibration report](experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+
+By default (`semantic=False`) no embedding model is loaded and nothing touches the
+network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1.5`
+embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
+comes into play.
 
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and
@@ -69,8 +81,10 @@ contract API, and semantic drift scoring respectively.
 
 ### Advanced / low-level API
 
+`Guard` is built on these classes, which remain fully supported:
+
 ```python
-from rmic_guard import load_contract, seal_contract_file, verify_contract, EnforcementEngine, ClaudeReasoning
+from rmic_guard import ClaudeReasoning, EnforcementEngine, PlannedToolCall, load_contract
 
 contract = load_contract("contracts/financial_agent.json")  # verifies contract_hash by default
 reasoning = ClaudeReasoning()
@@ -81,6 +95,9 @@ outcome = engine.evaluate_and_maybe_execute(
     plan, recent_ids=[], drift_type=None, execute_tool=True, enforcement_mode="full",
 )
 print(outcome.decision)
+
+# Without an LLM, build the plan yourself:
+plan = PlannedToolCall(tool_name="web_search", arguments={"query": "hello"}, raw_text="hello")
 ```
 
 Groq (Llama) is supported as a drop-in alternative to Claude:
@@ -95,7 +112,7 @@ reasoning = GroqReasoning(model_name="groq/llama-3.3-70b-versatile")
 ```bash
 rmic init research-agent        # scaffold a new agent project (contract + quickstart)
 rmic validate contract.json     # check a contract against the schema, no sealing
-rmic seal contract.json         # compute anchor_embedding + contract_hash, write back
+rmic seal contract.json         # compute anchor_embedding + contract_hash, write back to the file
 rmic verify contract.json       # check a sealed contract's hash is still intact
 ```
 
@@ -125,18 +142,18 @@ of this repo.
 
 | Path | Contents |
 |---|---|
-| `core/` | The enforcement engine: contract loading (`contract_loader.py`), explicit pre-validation (`validation.py`), the SDK exception hierarchy (`exceptions.py`), litellm-free tool-call planning data model (`planning.py`), hard-rule + IDS enforcement (`enforcement_engine.py`), the IDS scoring wrapper (`ids_engine.py`) and its 7 signal implementations (`ids_metric.py`), local embeddings with a pluggable backend (`embedder.py`, `embedding_interface.py`), the signed audit ledger (`audit_ledger.py`), re-anchoring recovery (`recovery_engine.py`), tool dispatch (`tool_layer.py`), LLM reasoning backends (`reasoning_layer.py`), and reproducibility manifests (`integrity_manifest.py`). |
-| `rmic_guard/` | The public SDK facade re-exported for `pip install rmic-guard` — `__init__.py` re-exports from `core/` (lazily for the optional LLM reasoning backends, so they don't force a `litellm` install), and `cli.py` implements the `rmic` command-line tool. |
-| `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `core/validation.py`'s error messages. |
-| `utils/` | Shared config loading (`config.py`) for `config.yaml`. |
+| `rmic_guard/` | The SDK shipped as `pip install rmic-guard`. `guard.py` is the high-level `Guard` API; `__init__.py` is the public import surface (LLM reasoning backends load lazily so they don't force a `litellm` install); `cli.py` implements the `rmic` command-line tool. |
+| `rmic_guard/_core/` | The enforcement engine (private; import from `rmic_guard` instead): contract loading (`contract_loader.py`), explicit pre-validation (`validation.py`), the SDK exception hierarchy (`exceptions.py`), litellm-free tool-call planning data model (`planning.py`), hard-rule + IDS enforcement (`enforcement_engine.py`), the IDS scoring wrapper (`ids_engine.py`) and its 7 signal implementations (`ids_metric.py`), local embeddings with a pluggable backend (`embedder.py`, `embedding_interface.py`), the signed audit ledger (`audit_ledger.py`), re-anchoring recovery (`recovery_engine.py`), tool dispatch (`tool_layer.py`), LLM reasoning backends (`reasoning_layer.py`), and reproducibility manifests (`integrity_manifest.py`). |
+| `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `rmic_guard/_core/validation.py`'s error messages. |
+| `rmic_guard/_utils/` | Config loading (`config.py`). The SDK reads a config file only when named explicitly via `RMIC_CONFIG`; the research scripts set it to this repo's `config.yaml`. |
 | `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`) plus a blank `_template_universal.json`. |
 | `prompts/` | The adversarial/legitimate prompt corpus, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`). |
 | `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), and IDS threshold-calibration diagnostics (`ids_calibration_investigation/`). |
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
 | `ibm_pilot/` | IBM watsonx Orchestrate integration — see below. |
-| `examples/` | `quickstart.py` (offline PASS/BLOCK), `basic_enforcement.py` (parameter/data-scope rules), `contract_creation.py` (beginner vs. advanced contract API), `identity_drift.py` (semantic IDS scoring). |
-| `tests/` | `pytest` suite covering contract creation/validation/integrity, enforcement decisions, tool registry, and IDS scoring — `pytest tests/`. |
+| `examples/` | `quickstart.py` (offline `Guard` PASS/BLOCK), `basic_enforcement.py` (parameter/data-scope rules), `contract_creation.py` (beginner vs. advanced contract API), `identity_drift.py` (semantic IDS scoring). |
+| `tests/` | `pytest` suite covering the `Guard` API, contract creation/validation/integrity, enforcement decisions, audit-log verification, tool registry, and IDS scoring — `pytest tests/`. |
 | `demo.py` | Root-level killer demo for Condition C (middleware-only enforcement). |
 | `preflight_check.py` | No-API-call environment validation. |
 | `seal_contracts.py` | Computes and writes the SHA-256 `contract_hash` (and embedding anchor, where possible) for each file in `contracts/`. |
@@ -162,6 +179,10 @@ pip install -r requirements.txt
 ```
 
 (On macOS/Linux, activate with `source .venv/bin/activate` instead.)
+
+The research scripts (`experiment/`, `baselines/`, `demo.py`, `preflight_check.py`,
+`ibm_pilot/`) point the SDK at this repo's `config.yaml` by setting `RMIC_CONFIG`
+themselves; set it explicitly to use a different config file.
 
 Create `.env` in the project root:
 
@@ -340,16 +361,23 @@ distinct from the per-call Base IDS drift score above.
 ## Audit Ledger & Contract Sealing
 
 Every enforcement decision can be recorded to an append-only, Ed25519-signed JSONL
-ledger (`core/audit_ledger.py`), giving each entry a tamper-evident signature over its
-timestamp, agent ID, IDS score, drift type, and decision.
+ledger (`rmic_guard/_core/audit_ledger.py`), giving each entry a tamper-evident signature over its
+timestamp, agent ID, IDS score, drift type, and decision. Each line also stores the SHA-256 of
+the previous line inside its signed payload, so `verify_file()` detects deleted, inserted and
+reordered lines as well as edits (tail truncation needs an externally recorded
+`AuditLedger.head_hash()`). The signing key persists across
+restarts (`audit_key=` / `RMIC_AUDIT_KEY` / `<log>.key`), and the public key is written to
+`<log>.pub` so `AuditLedger.verify_file(<log>)` can check the log later.
 
 Contracts are sealed before use: `seal_contracts.py` computes a SHA-256 hash over each
 contract's fields (and an embedding anchor, when an embedding backend is available) and
-writes it back into the contract file as `contract_hash`. `load_contract(..., verify_hash=True)`
+writes it back into the contract file as `contract_hash` (`seal_contract_file(..., write_back=True)`;
+since v0.3.0 `seal_contract_file()` alone seals in memory only). `load_contract(..., verify_hash=True)`
 (the default) checks this hash at load time; pass `verify_hash=False` to skip it during
-local experimentation.
+local experimentation. An unsealed file is sealed automatically on load (`auto_seal=True`,
+the default), in memory only unless you also pass `write_back=True`.
 
-On a WARN-level IDS score, `core/recovery_engine.py` generates a re-anchoring system
+On a WARN-level IDS score, `rmic_guard/_core/recovery_engine.py` generates a re-anchoring system
 message and user nudge derived from the contract's sealed `semantic_anchors`, giving the
 model one retry before a hard BLOCK — this is what produces the `NEEDS_RECOVERY` /
 `PREEMPTIVE_WARN` decisions in `EnforcementOutcome`.
@@ -375,7 +403,7 @@ for the architecture and live-verified results (4/4 test scenarios), and
 [`ibm_pilot/README.md`](ibm_pilot/README.md) for the full pilot design.
 
 Because Orchestrate's Python-tool sandbox only receives a single file plus a
-`requirements.txt` (it can't import this repo's local `core/` package), the
+`requirements.txt` (it can't import this repo's `rmic_guard` package), the
 deployed tool is a self-contained adapter (`orchestrate_tool_standalone.py`)
 that inlines the sealed contract's rules directly, with a keyword-based
 stand-in for the semantic IDS scoring.

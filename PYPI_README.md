@@ -17,8 +17,8 @@ with two layers:
 pip install rmic-guard
 ```
 
-This installs only core enforcement functionality — no LLM provider SDKs. To also
-plan tool calls with a real LLM:
+This installs core enforcement plus the local `fastembed` embedding backend —
+no LLM provider SDKs. To also plan tool calls with a real LLM:
 
 ```bash
 pip install "rmic-guard[anthropic]"   # Claude, via LiteLLM
@@ -33,44 +33,97 @@ PyTorch-based fallback instead:
 pip install "rmic-guard[torch]"
 ```
 
-## Quickstart — no LLM key, no network call
+## Quickstart
 
 ```python
-from rmic_guard import RMICContract, ToolRegistry, EnforcementEngine
-from core.planning import PlannedToolCall
+from rmic_guard import Guard
 
-contract = RMICContract.create(
-    agent_id="research-agent",
-    role_name="Research Agent",
-    sector="research",
-    role_description="Performs safe research tasks.",
-    semantic_anchors=[
-        "I perform research and information gathering.",
-        "I do not perform destructive or unauthorized actions.",
-    ],
-    allowed_actions=["web_search"],
-    forbidden_actions=["delete_data"],
-    require_embedding=False,  # skip the semantic-drift model download for this demo
-)
+guard = Guard("contracts/bank_bot.json")        # load + validate + seal + verify
 
-tools = ToolRegistry()
-tools.register("web_search", lambda query: {"results": [f"Search results for: {query}"]})
-tools.register("delete_data", lambda path: {"deleted": path})
+@guard.tool
+def transfer_funds(amount: float, to: str):
+    return {"sent": amount, "to": to}
 
-engine = EnforcementEngine(contract=contract, tools=tools)
-
-safe = engine.evaluate_and_maybe_execute(
-    PlannedToolCall("web_search", {"query": "hello"}, "hello"),
-    recent_ids=[], enforcement_mode="hard_rules_only",
-)
-print(safe.decision)  # PASS
-
-blocked = engine.evaluate_and_maybe_execute(
-    PlannedToolCall("delete_data", {"path": "/prod/db"}, "delete the prod db"),
-    recent_ids=[], enforcement_mode="hard_rules_only",
-)
-print(blocked.decision)  # BLOCK
+result = guard.check("transfer_funds", amount=500, to="4321", message="pay rent")
+print(result.allowed, result.decision, result.reason, result.output)
 ```
+
+`Guard` loads the contract (a file path, a dict, or an `RMICContract`), seals
+it in memory if it isn't sealed yet, and verifies the hash if it is
+(`ContractIntegrityError` on tampering). `guard.check(...)` enforces one tool
+call and runs your function **only** if it is allowed.
+
+> **Semantic mode is experimental and off by default.** `Guard` enforces the
+> contract's hard rules (forbidden tools, parameter bounds, data scope) unless you pass
+> `semantic=True`. On the current scoring, the semantic identity-drift score (IDS) does
+> not separate attacks from legitimate requests: across the 4 bundled contracts, attacks
+> score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
+> catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
+> [calibration report](https://github.com/Arshu-1104/RMIC/blob/main/experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+
+
+| `GuardResult` field | Meaning |
+|---|---|
+| `allowed` | `True` for `PASS` / `PREEMPTIVE_WARN` |
+| `decision` | `PASS`, `BLOCK`, `NEEDS_RECOVERY` or `PREEMPTIVE_WARN` |
+| `reason` | hard-rule violation (`forbidden_tool`, `parameter_constraint:amount:above_max`, ...) or IDS reason |
+| `ids_score` | Identity Drift Score (0 in hard-rules-only mode) |
+| `output` | your tool's return value, or `None` if it didn't run |
+| `recovery_attempted`, `contract_hash` | recovery flag and the contract that was enforced |
+
+Pass the data categories a call touches with `data=["ssn"]`. Per-session IDS
+and tool-call history is kept for you: `guard.reset()` clears it, and
+`guard.session("user-42").check(...)` gives each conversation its own history.
+
+### Fully offline: hard rules only
+
+```python
+guard = Guard({"agent_id": "bot", "role_name": "Bot", "sector": "demo",
+               "semantic_anchors": ["I check balances."],
+               "allowed_actions": ["check_balance"], "forbidden_actions": ["admin_login"]},
+              semantic=False)   # the default; shown for clarity
+guard.register("check_balance", lambda: {"balance": 100})
+print(guard.check("check_balance"))   # allowed=True, decision=PASS
+print(guard.check("admin_login"))     # allowed=False, decision=BLOCK, reason=forbidden_tool
+```
+
+`semantic=False` (the default) enforces forbidden tools, parameter bounds and
+data scope with no embedding model and no network. With the experimental
+`semantic=True`, **the first use downloads the `BAAI/bge-small-en-v1.5`
+embedding model once** (then it's cached locally).
+
+### Let an LLM plan the call
+
+```bash
+pip install "rmic-guard[groq]"   # or [anthropic]
+```
+
+```python
+result = guard.run("Transfer $500 to 4321 for rent", llm="groq/llama-3.3-70b-versatile")
+```
+
+With `semantic=True` (experimental), if the plan lands in the IDS warn zone (`NEEDS_RECOVERY`), `run()` re-plans
+once with re-anchoring instructions (`max_recovery=1`) and enforces again; if
+it still isn't allowed, the result is blocked and the tool never runs.
+
+### Signed audit log
+
+```python
+guard = Guard("contracts/bank_bot.json", audit_log="audit.jsonl")
+...
+guard.verify_log()   # False if any entry was edited, deleted, inserted or reordered
+```
+
+Every decision is appended to `audit.jsonl` with an Ed25519 signature, and
+each line stores the SHA-256 of the line before it, so deleted or reordered
+lines break the chain. (Cutting lines off the *end* leaves a shorter valid
+chain: record `AuditLedger.head_hash("audit.jsonl")` elsewhere to detect that.) The
+signing key comes from `audit_key=...`, else `RMIC_AUDIT_KEY`, else
+`audit.jsonl.key` (created with 0600 permissions on first use). The public
+key is written to `audit.jsonl.pub`, so `AuditLedger.verify_file("audit.jsonl")`
+works after a restart or on another machine.
+
+## Writing contracts in code
 
 `RMICContract.create(...)` validates the contract, computes its semantic-anchor
 embedding (unless `require_embedding=False`), hashes it, and seals it — all in
@@ -85,8 +138,12 @@ Invalid RMIC contract (RMICContract.create(...)):
 
 ## Advanced / low-level API
 
+`Guard` is a layer over these classes, which remain fully supported:
+
 ```python
-from rmic_guard import load_contract, seal_contract_file, verify_contract, EnforcementEngine, ClaudeReasoning
+from rmic_guard import (
+    ClaudeReasoning, EnforcementEngine, PlannedToolCall, ToolRegistry, load_contract,
+)
 
 contract = load_contract("contracts/financial_agent.json")  # verifies contract_hash by default
 reasoning = ClaudeReasoning()  # reads ANTHROPIC_API_KEY from the environment
@@ -94,7 +151,7 @@ plan = reasoning.plan_tool_call(
     "What's my current account balance?", contract=contract, condition="C",
 )
 
-engine = EnforcementEngine(contract=contract, tools=my_tool_registry, ledger=None)
+engine = EnforcementEngine(contract=contract, tools=ToolRegistry(), ledger=None)
 outcome = engine.evaluate_and_maybe_execute(
     plan,
     recent_ids=[],       # pass prior IDS scores for trajectory tracking across a session
@@ -102,7 +159,7 @@ outcome = engine.evaluate_and_maybe_execute(
     execute_tool=True,
     enforcement_mode="full",  # "full" | "hard_rules_only" | "ids_only"
 )
-print(outcome.decision)  # "PASS" | "WARN" | "BLOCK" | "NEEDS_RECOVERY" | "PREEMPTIVE_WARN"
+print(outcome.decision)  # "PASS" | "BLOCK" | "NEEDS_RECOVERY" | "PREEMPTIVE_WARN"
 ```
 
 Groq (Llama) is supported as a drop-in alternative to Claude:
@@ -112,12 +169,19 @@ from rmic_guard import GroqReasoning
 reasoning = GroqReasoning(model_name="groq/llama-3.3-70b-versatile")
 ```
 
+## Configuration
+
+The SDK uses each contract's own `ids_warn_threshold` / `ids_block_threshold`.
+It reads a YAML config file only when you name one explicitly, via the
+`RMIC_CONFIG` environment variable; a `config.yaml` that happens to sit in
+your working directory is ignored.
+
 ## CLI
 
 ```bash
 rmic init research-agent        # scaffold a new agent project (contract + quickstart)
 rmic validate contract.json     # check a contract against the schema, no sealing
-rmic seal contract.json         # compute anchor_embedding + contract_hash, write back
+rmic seal contract.json         # compute anchor_embedding + contract_hash, write back to the file
 rmic verify contract.json       # check a sealed contract's hash is still intact
 ```
 
@@ -135,7 +199,7 @@ legal-review agent roles.
 
 ## Status
 
-This is an early (0.2.x) release from an active research project on
+This is an early (0.3.x) release from an active research project on
 role-boundary preservation in autonomous agents. APIs may change between
 minor versions until 1.0. Issues and contributions welcome on
 [GitHub](https://github.com/Arshu-1104/RMIC).

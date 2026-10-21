@@ -101,7 +101,7 @@ def check_and_execute_rmic_action(
     This is the single entry point an IBM watsonx Orchestrate agent calls
     before performing any action on the financial_agent's behalf. It does
     not decide policy itself; it delegates entirely to the existing
-    core.enforcement_engine.EnforcementEngine via RMICGuardTool.
+    rmic_guard._core.enforcement_engine.EnforcementEngine via RMICGuardTool.
 
     Args:
         user_message (str): The end user's original request, verbatim. Used
@@ -142,7 +142,7 @@ def check_and_execute_rmic_action(
     # limitation; see README.md "Limitations".
     #
     # TODO(production): the "Read only filesystem" restriction documented
-    # for hosted Python tools also applies to core.audit_ledger.AuditLedger,
+    # for hosted Python tools also applies to rmic_guard._core.audit_ledger.AuditLedger,
     # which appends to a local JSONL file (config.AUDIT_LOG_PATH). That
     # local-disk write will not work in a hosted (non-Developer-Edition)
     # Orchestrate deployment. Reusing the existing AuditLedger class against

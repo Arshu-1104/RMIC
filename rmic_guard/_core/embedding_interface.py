@@ -7,7 +7,7 @@ from typing import Protocol
 
 import numpy as np
 
-from core.embedder import embed_texts, normalise_l2
+from rmic_guard._core.embedder import embed_texts, normalise_l2
 
 
 class EmbeddingProvider(Protocol):

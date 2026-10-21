@@ -21,7 +21,7 @@ from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
-from core.embedder import embed_texts
+from rmic_guard._core.embedder import embed_texts
 
 DB_PATH = "results/experiment_results.db"
 CONDITION = "C2_ids_only"

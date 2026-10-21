@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from core.contract_loader import RMICContract
-from core.ids_engine import IDSEngine
-from core.ids_metric import compute_ids_components, trajectory_curvature
+from rmic_guard._core.contract_loader import RMICContract
+from rmic_guard._core.ids_engine import IDSEngine
+from rmic_guard._core.ids_metric import compute_ids_components, trajectory_curvature
 
 
 def _sealed_contract() -> RMICContract:
@@ -71,7 +71,7 @@ class TestTrajectoryCurvature:
 
 class TestToolFrequencyDrift:
     def test_all_allowed_tools_scores_zero(self) -> None:
-        from core.ids_metric import tool_frequency_drift
+        from rmic_guard._core.ids_metric import tool_frequency_drift
 
         score = tool_frequency_drift(
             tool_call_history=["web_search", "web_search", "web_search"],
@@ -80,7 +80,7 @@ class TestToolFrequencyDrift:
         assert score == 0.0
 
     def test_all_disallowed_tools_scores_one(self) -> None:
-        from core.ids_metric import tool_frequency_drift
+        from rmic_guard._core.ids_metric import tool_frequency_drift
 
         score = tool_frequency_drift(
             tool_call_history=["delete_data", "delete_data"],

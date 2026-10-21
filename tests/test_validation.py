@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.exceptions import InvalidContractError
-from core.validation import validate_contract_dict
+from rmic_guard._core.exceptions import InvalidContractError
+from rmic_guard._core.validation import validate_contract_dict
 
 
 def _valid() -> dict:

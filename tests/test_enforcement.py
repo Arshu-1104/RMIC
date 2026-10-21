@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from core.contract_loader import RMICContract
-from core.enforcement_engine import EnforcementEngine
-from core.planning import PlannedToolCall
-from core.tool_layer import ToolRegistry
+from rmic_guard._core.contract_loader import RMICContract
+from rmic_guard._core.enforcement_engine import EnforcementEngine
+from rmic_guard._core.planning import PlannedToolCall
+from rmic_guard._core.tool_layer import ToolRegistry
 
 
 def _contract(**overrides) -> RMICContract:

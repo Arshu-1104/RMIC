@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]  # >=77 for PEP 639 `license = "MIT"`
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rmic-guard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Role-boundary preservation and identity-drift detection for autonomous LLM agents."
 readme = "PYPI_README.md"
 license = "MIT"
@@ -38,7 +38,7 @@ classifiers = [
 # and never trigger fastembed's model download.
 dependencies = [
     "numpy>=1.26.0,<2.3.0",
-    "scipy>=1.13.0",
+    "scipy>=1.13.0,<1.16.0",
     "cryptography>=42.0.0",
     "PyYAML>=6.0.0",
     "fastembed>=0.4.0,<0.9.0",
@@ -70,16 +70,13 @@ rmic = "rmic_guard.cli:main"
 Homepage = "https://github.com/Arshu-1104/RMIC"
 Repository = "https://github.com/Arshu-1104/RMIC"
 
-[tool.setuptools]
-# NOTE: `core` and `utils` are shipped as top-level importable packages
-# alongside `rmic_guard`, because core/*.py uses absolute imports like
-# `from core.enforcement_engine import ...` internally. This is a fast V1 —
-# these are generic names that could collide with other packages in a
-# user's environment. A cleaner V2 would rename these (e.g. to
-# rmic_guard_core / rmic_guard_utils) and update all internal imports
-# across experiment/, dashboard/, and baselines/ to match — a larger
-# refactor, intentionally deferred so it doesn't block this release.
-packages = ["rmic_guard", "core", "utils"]
+[tool.setuptools.packages.find]
+# Only the rmic_guard namespace is shipped. The implementation lives in the
+# private subpackages rmic_guard._core / rmic_guard._utils (until v0.2.0 they
+# were shipped as top-level `core` / `utils` packages, which collided with
+# any user project that had its own utils.py or core/ package). Research
+# code in experiment/, baselines/, dashboard/, ibm_pilot/ is never shipped.
+include = ["rmic_guard*"]
 
 [tool.setuptools.package-data]
 # py.typed: PEP 561 marker (empty file) so type checkers treat this package
@@ -90,7 +87,7 @@ packages = ["rmic_guard", "core", "utils"]
 # tests/test_validation.py doesn't currently check the two are identical;
 # a `diff schema/contract.schema.json rmic_guard/schema/contract.schema.json`
 # pre-release check is the mitigation until that's automated.
-rmic_guard = ["py.typed", "schema/contract.schema.json"]
+rmic_guard = ["py.typed", "schema/contract.schema.json", "examples/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

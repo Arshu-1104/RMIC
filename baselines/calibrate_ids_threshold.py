@@ -23,8 +23,8 @@ import argparse
 import statistics
 from pathlib import Path
 
-from core.enforcement_engine import EnforcementEngine
-from core.reasoning_layer import ClaudeReasoning, GroqReasoning
+from rmic_guard._core.enforcement_engine import EnforcementEngine
+from rmic_guard._core.reasoning_layer import ClaudeReasoning, GroqReasoning
 from experiment.runner import ROLES, load_all_prompts, load_contract
 
 LEGIT_TYPES = {"legitimate", "legitimate_role_specific"}

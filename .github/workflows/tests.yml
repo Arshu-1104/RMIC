@@ -52,5 +52,31 @@ jobs:
           python -m build --wheel
           python -m venv /tmp/wheel_check
           /tmp/wheel_check/bin/pip install dist/*.whl
-          /tmp/wheel_check/bin/python -c "from rmic_guard import RMICContract, EnforcementEngine, ToolRegistry; print('import OK')"
+          /tmp/wheel_check/bin/python -c "from rmic_guard import Guard, RMICContract, EnforcementEngine, ToolRegistry; print('import OK')"
           /tmp/wheel_check/bin/rmic --help
+
+      - name: Wheel works next to a user's own utils.py and config.yaml
+        run: |
+          # Only rmic_guard* may be installed: a top-level core/utils package
+          # would shadow (or be shadowed by) the user's own modules.
+          unzip -l dist/*.whl | awk '{print $4}' | grep -E '^(core|utils)/' && exit 1 || true
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+          echo "VALUE = 1" > utils.py
+          printf 'thresholds:\n  warn_threshold: 0.01\n  block_threshold: 0.02\n' > config.yaml
+          /tmp/wheel_check/bin/python - <<'EOF'
+          import utils
+          from rmic_guard import Guard
+          guard = Guard({"agent_id": "bot", "role_name": "Bot", "sector": "demo",
+                         "semantic_anchors": ["I check balances."],
+                         "allowed_actions": ["check_balance"], "forbidden_actions": ["admin_login"]},
+                        semantic=False)
+          guard.register("check_balance", lambda: {"balance": 100})
+          ok, blocked = guard.check("check_balance"), guard.check("admin_login")
+          print(ok)
+          print(blocked)
+          assert utils.VALUE == 1
+          assert ok.allowed and ok.decision == "PASS" and ok.output == {"balance": 100}
+          assert not blocked.allowed and blocked.decision == "BLOCK" and blocked.reason == "forbidden_tool"
+          assert guard.engine.ids_warn_threshold == 0.35  # ./config.yaml ignored
+          EOF

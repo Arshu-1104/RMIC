@@ -6,15 +6,15 @@ same repository components ibm_pilot/rmic_guard_tool.py and
 ibm_pilot/agent_example.py already wire together:
 
     User Request
-      -> (simulated) IBM watsonx Orchestrate Agent   [core.reasoning_layer.ReasoningLayer]
+      -> (simulated) IBM watsonx Orchestrate Agent   [rmic_guard._core.reasoning_layer.ReasoningLayer]
       -> RMIC Guard Tool                              [ibm_pilot.rmic_guard_tool.RMICGuardTool]
-      -> Existing Enforcement Engine                  [core.enforcement_engine.EnforcementEngine]
-      -> Machine-Checkable Identity Contract          [core.contract_loader.RMICContract]
+      -> Existing Enforcement Engine                  [rmic_guard._core.enforcement_engine.EnforcementEngine]
+      -> Machine-Checkable Identity Contract          [rmic_guard._core.contract_loader.RMICContract]
       -> Decision -> ALLOW (execute stub business tool) | BLOCK (reject)
 
 No IBM SDK is required to run this file. It stands in for the Orchestrate
 agent's own planning step using the repository's existing
-core.reasoning_layer.ReasoningLayer — the same class the repository's own
+rmic_guard._core.reasoning_layer.ReasoningLayer — the same class the repository's own
 top-level demo.py already uses — so tool_name/arguments below are real
 model output, not hardcoded, and the four required scenarios can be
 demonstrated without a live Orchestrate instance.
@@ -36,7 +36,7 @@ sys.path.insert(
 from anthropic import APIConnectionError, APIStatusError, AuthenticationError
 from dotenv import load_dotenv
 
-from core.reasoning_layer import PlannedToolCall, ReasoningLayer
+from rmic_guard._core.reasoning_layer import PlannedToolCall, ReasoningLayer
 
 from ibm_pilot import config
 from ibm_pilot.rmic_guard_tool import IBMAgentRequest, IBMToolResponse, RMICGuardTool
@@ -96,13 +96,13 @@ def main() -> None:
     print()
 
     # Stands in for the IBM watsonx Orchestrate agent's own planning step.
-    # Reuses core.reasoning_layer.ReasoningLayer exactly as the repository's
+    # Reuses rmic_guard._core.reasoning_layer.ReasoningLayer exactly as the repository's
     # own demo.py does — tool_name/arguments are real model output.
     reasoning = ReasoningLayer()
 
     # Reuses ibm_pilot.rmic_guard_tool.RMICGuardTool, which itself reuses
-    # core.contract_loader.load_contract, core.audit_ledger.AuditLedger, and
-    # core.enforcement_engine.EnforcementEngine exactly as constructed there.
+    # rmic_guard._core.contract_loader.load_contract, rmic_guard._core.audit_ledger.AuditLedger, and
+    # rmic_guard._core.enforcement_engine.EnforcementEngine exactly as constructed there.
     guard_tool = RMICGuardTool()
 
     results: list[tuple[str, str, str]] = []  # (label, expected, actual)
@@ -144,7 +144,7 @@ def main() -> None:
         print(
             "\nNote: one or more scenarios did not match the expected decision.\n"
             "tool_name/arguments above are planned by a live LLM call\n"
-            "(core.reasoning_layer.ReasoningLayer), not hardcoded, so wording\n"
+            "(rmic_guard._core.reasoning_layer.ReasoningLayer), not hardcoded, so wording\n"
             "the model settles on can vary between runs — inspect the audit\n"
             "log or re-run if a mismatch is unexpected."
         )
@@ -157,7 +157,7 @@ if __name__ == "__main__":
         if "ANTHROPIC_API_KEY" in str(e) or "GROQ_API_KEY" in str(e):
             print(
                 "Error: set ANTHROPIC_API_KEY or GROQ_API_KEY in .env or the "
-                "environment (see utils.config.load_config's 'model.provider').",
+                "environment (see rmic_guard._utils.config.load_config's 'model.provider').",
                 file=sys.stderr,
             )
             sys.exit(1)
