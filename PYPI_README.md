@@ -127,6 +127,22 @@ signing key comes from `audit_key=...`, else `RMIC_AUDIT_KEY`, else
 key is written to `audit.jsonl.pub`, so `AuditLedger.verify_file("audit.jsonl")`
 works after a restart or on another machine.
 
+### Contract hard-rule extensions
+
+Optional contract fields, validated at load and covered by the contract hash:
+
+- `argument_rules`: per-tool `allowed_args` (for fixed-schema tools) and full-match `patterns`
+  for argument values → `BLOCK argument_not_allowed:<tool>:<arg>` / `argument_pattern:<tool>:<arg>`.
+- `confirm_above` in `parameter_constraints`: larger values return `NEEDS_CONFIRMATION`
+  (tool not run); `guard.confirm(result.confirmation_id)` runs it exactly once and logs it.
+- `deny_patterns` (opt-in): phrase packs `role_reassignment`, `objective_override`,
+  `guardrail_removal`, your own regexes and `prohibited_terms`, matched against the user's
+  message → `BLOCK deny_pattern:<pack>:<id>` or a warning. **These are heuristics: rewordings
+  evade them.**
+
+See the [README on GitHub](https://github.com/Arshu-1104/RMIC#contract-hard-rule-extensions-v04)
+for examples, and `load_example_contract("financial_agent_hardened")` for a contract using them.
+
 ## Writing contracts in code
 
 `RMICContract.create(...)` validates the contract, computes its semantic-anchor

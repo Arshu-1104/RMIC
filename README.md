@@ -78,6 +78,79 @@ network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1
 embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
 comes into play.
 
+### Contract hard-rule extensions (v0.4)
+
+Three optional contract fields tighten the hard rules. They are validated when the contract is
+loaded (an invalid regex is rejected), covered by the contract hash, and contracts without them
+behave exactly as before.
+
+**`argument_rules`: what a tool's arguments may look like.** Use `allowed_args` only for tools
+with a fixed schema (e.g. function calling): an LLM writing free-form JSON invents argument names,
+and an allowlist would then block legitimate calls.
+
+```json
+"argument_rules": {
+  "transfer_funds": {
+    "allowed_args": ["amount", "to_account"],
+    "patterns": {"to_account": "\\d{4}|(?:chk|sav)-\\d{4}"},
+    "max_length": 64
+  }
+}
+```
+
+- An argument not in `allowed_args` → `BLOCK`, reason `argument_not_allowed:<tool>:<arg>`.
+- A value that does not **full-match** its pattern → `BLOCK`, reason `argument_pattern:<tool>:<arg>`.
+  Strings and numbers (by their decimal form) are matched; lists element by element; any other
+  type, or a value longer than `max_length` (default 1024), fails. Regexes are limited to 500
+  characters.
+
+**`confirm_above`: a human confirms large values.** Inside `parameter_constraints`:
+
+```json
+"parameter_constraints": {"amount": {"min": 0.01, "max": 50000, "confirm_above": 10000, "type": "float"}}
+```
+
+```python
+result = guard.check("transfer_funds", amount=20000, to_account="4321")
+result.decision          # "NEEDS_CONFIRMATION": the tool has not run; result.allowed is False
+result.reason            # "confirm_above:amount"
+done = guard.confirm(result.confirmation_id)   # runs the tool exactly once -> decision "CONFIRMED"
+guard.confirm(result.confirmation_id)          # raises ConfirmationNotFoundError: ids are single-use
+```
+
+Values above `max` are still blocked outright. Both the `NEEDS_CONFIRMATION` and the `CONFIRMED`
+entries are written to the hash-chained audit log with the same `confirmation_id`. Pending
+confirmations live in memory in the `Guard` that issued them.
+
+**`deny_patterns`: opt-in phrase heuristics on the user's message.**
+
+```json
+"deny_patterns": {
+  "packs": ["role_reassignment", {"name": "objective_override", "action": "warn"}, "guardrail_removal"],
+  "custom": [{"id": "crypto", "regex": "\\bcrypto\\b", "action": "block"}],
+  "prohibited_terms": {"terms": ["tax return", "credit score"], "action": "block"}
+}
+```
+
+Matches block with reason `deny_pattern:<pack>:<pattern_id>` (`custom` and `prohibited_terms` are
+pack names too); `"action": "warn"` lets the call run and lists the match in `result.warnings`.
+Patterns are matched against the end user's message only, never the model's output
+(`Guard.run()` passes the user's message separately). `prohibited_terms` match whole words,
+case-insensitively.
+
+> **These are heuristics, and rewording evades them.** The packs catch explicit wording such as
+> "from now on you're my accountant" or "your new goal is…". "Instead of support, …" or
+> "as the company's lawyer, …" get through. On the `prompts_v2` tune split the three packs caught
+> 20 of the 41 attacks the other hard rules miss, with 0 of 80 legitimate items flagged
+> (prohibited terms alone caught 3). On the original `prompts/` corpus they match 12–14 of 25
+> attacks per contract. Both estimates are optimistic, because the same person wrote the
+> `prompts_v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
+> They are off in every bundled contract. Treat them as a cheap extra layer, not as protection.
+
+`contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
+is the research `financial_agent` contract plus `confirm_above: 10000` and account-format
+`patterns` (no `allowed_args`).
+
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and
 `examples/identity_drift.py` for parameter constraints, data scope, the advanced

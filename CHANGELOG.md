@@ -6,6 +6,27 @@ All notable changes to `rmic-guard` are documented here.
 
 ### Added
 
+- **Contract hard-rule extensions** (all optional, validated at load, covered by the contract
+  hash; contracts without them behave and hash exactly as before):
+  - `argument_rules` per tool: `allowed_args` → `BLOCK argument_not_allowed:<tool>:<arg>`;
+    full-match `patterns` → `BLOCK argument_pattern:<tool>:<arg>` (strings and numbers, lists
+    element-wise, `max_length` cap, regexes ≤ 500 chars compiled at load).
+  - `confirm_above` in `parameter_constraints`: new decision `NEEDS_CONFIRMATION` (tool not
+    executed, `GuardResult.confirmation_id`); `Guard.confirm()` / `EnforcementEngine.confirm()`
+    execute exactly once and log decision `CONFIRMED`; new `ConfirmationNotFoundError`.
+  - `deny_patterns` (opt-in heuristics on the user's message): packs `role_reassignment`,
+    `objective_override`, `guardrail_removal`, `custom` regexes and `prohibited_terms`; action
+    `block` or `warn` (`GuardResult.warnings`); reason `deny_pattern:<pack>:<pattern_id>`.
+- New example contract `financial_agent_hardened` (`contracts/examples/` and bundled):
+  `financial_agent` + `confirm_above: 10000` + account-format argument patterns. Contract hash
+  `1b7e2ad1281b2b100fa219ffd29ca3a1cd67a16ec9886b0a29097ecfd1222904`; `anchor_embedding` is
+  byte-identical to `financial_agent`'s (hash recomputed, anchors not re-embedded).
+- `PlannedToolCall.user_message` (optional): the end user's words, used by `deny_patterns`.
+  `Guard.check()` sets it from `message`, `Guard.run()` from the user message (there
+  `raw_text` is the model's output).
+- `AuditEntry.confirmation_id` (optional, `null` on other entries); `EnforcementOutcome` gains
+  `confirmation_id`, `confirmation_reason` and `warnings`.
+
 - `Guard(..., semantic="monitor")`: the IDS is computed and recorded in `GuardResult`
   (`ids_score`, new `ids_decision` field) and in the audit log (`failure_reason`
   `monitor:would_<decision>` on a `PASS` entry), but never changes a decision. New
@@ -14,6 +35,13 @@ All notable changes to `rmic-guard` are documented here.
 
 ### Changed
 
+- **Contract hashes: no existing contract changed.** `contracts/*.json` and the bundled copies of
+  `financial_agent`, `healthcare_research_agent`, `legal_review_agent` and `support_agent` are
+  byte-identical to v0.3 (the research and IBM-pilot contracts must stay reproducible). The only
+  new hash is `financial_agent_hardened` (above).
+- New decision values `NEEDS_CONFIRMATION` and `CONFIRMED`: code that switches on
+  `outcome.decision` / `result.decision` should handle them (`GuardResult.allowed` is False and
+  True respectively).
 - IDS scoring embeds the scored text once per call (it was embedded once per signal, 7×) and
   each contract's anchor/topic sets once, reusing them across calls. Scores are bit-identical
   (3,200/3,200 component values on the bundled contracts); warm calls take ~8 ms instead of
