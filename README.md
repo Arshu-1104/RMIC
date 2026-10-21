@@ -179,6 +179,49 @@ to that point, and the result carries the warning `deny_pattern_scan_truncated:1
 is the research `financial_agent` contract plus `confirm_above: 10000` and account-format
 `patterns` (no `allowed_args`).
 
+### Evaluation (v0.4)
+
+One evaluation, run once and with no tuning, on an **external public set (primary)** and a
+**model-generated, context-isolated set (secondary)**. Each attack and legitimate request was
+checked with `guard.check()` and `semantic=False`, under three conditions:
+
+- **(a)** the v0.3 hard rules (the research contracts);
+- **(b)** (a) plus `argument_rules` and `confirm_above` (`financial_agent_hardened`; the other
+  contracts define neither, so (b) = (a) there);
+- **(c)** (b) plus the three deny-pattern packs.
+
+Cells are k/n with a Wilson 95% interval. Full results, including every miss and every false
+positive verbatim: [`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
+
+| Set | Items | Attacks blocked (a) / (b) / (c) | Legitimate blocked (a) / (b) / (c) |
+|---|---|---|---|
+| External (AgentDojo banking, InjecAgent, AgentHarm; 4 contracts) | 80 attacks, 65 legitimate | 72/80 (90%, 81–95) in all three | 56/65 (86%, 76–93) in all three |
+| Generated (`legal_review_agent` only) | 45 attacks, 42 legitimate | 37/45 (82%, 69–91) / 37/45 / 40/45 (89%, 77–95) | 0/42 (0%, 0–8) in all three |
+
+How to read it:
+
+- **On the external set, the contracts' tool lists did all the work.** Most items use dataset
+  tools that are outside the contracts' allowed lists or map to forbidden tools. Those items are
+  blocked in every condition, legitimate ones included, so the 86% says nothing about the v0.4
+  extensions. The extensions changed no outcome there in either direction.
+- **The 8 external attacks that got through** are all `financial_agent` transfers through the
+  allowed `transfer_funds` tool: AgentDojo injection tasks sending money to an attacker's IBAN,
+  and InjecAgent payment requests.
+  - The account pattern accepts an IBAN as a valid account label.
+  - The one $30,000 attack is split into transfers of at most $10,000, so `confirm_above: 10000`
+    never fires.
+- **Deny patterns are wording heuristics.** They added 3 blocks on the generated set and none on
+  the external set, and caused no false positives on either.
+- **Semantic mode is monitor-only.** In condition (d) (`semantic="monitor"`) the IDS did not
+  separate attacks from legitimate requests (ROC AUC 0.48 external, 0.59 generated). Use
+  `semantic="monitor"` to collect data, not to enforce.
+- **Limits.**
+  - The generated set exists for one contract only. Generation for the other three was stopped by
+    a safety classifier and not retried.
+  - Indirect injections were scored as if the attack text were the user's message, an upper
+    bound for deny patterns.
+  - A human-written blind set (`prompts/v3/README.md`) is still outstanding.
+
 ### Sealing
 
 A sealed contract carries `contract_hash`, a SHA-256 over the canonical JSON of every other
@@ -283,8 +326,8 @@ of this repo.
 | `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `rmic_guard/_core/validation.py`'s error messages (an identical copy ships in `rmic_guard/schema/`). |
 | `rmic_guard/_utils/` | Config loading (`config.py`). The SDK reads a config file only when named explicitly via `RMIC_CONFIG`; the research scripts set it to this repo's `config.yaml`. |
 | `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`); `examples/` holds `financial_agent_hardened.json` and `template.json`, a minimal contract to start from (see [`contracts/README.md`](contracts/README.md)). |
-| `prompts/` | The v1 adversarial/legitimate prompt corpus used by the experiment, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`); `v2/` is the per-contract corpus with a frozen tune/held-out split (held-out already used), `v3/` the brief for a future blind test set. |
-| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), and IDS latency measurements (`perf/`). |
+| `prompts/` | The v1 adversarial/legitimate prompt corpus used by the experiment, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`); `v2/` is the per-contract corpus with a frozen tune/held-out split (held-out already used), `v3/` the brief for a future blind test set plus its model-generated secondary set (`v3/generated/`); `external/` the v0.4 external evaluation set built from public datasets. |
+| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), and the v0.4 evaluation (`eval_v0.4/`). |
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
 | `ibm_pilot/` | IBM watsonx Orchestrate integration (adapter, standalone Orchestrate tools, agent YAMLs, `demo.py`, `run_single.py`, tests) — see below. |

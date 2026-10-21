@@ -146,6 +146,20 @@ Optional contract fields, validated at load and covered by the contract hash:
 See the [README on GitHub](https://github.com/Arshu-1104/RMIC#contract-hard-rule-extensions-v04)
 for examples, and `load_example_contract("financial_agent_hardened")` for a contract using them.
 
+**Evaluation (v0.4).** One run, no tuning, on an external public set (primary: AgentDojo banking,
+InjecAgent, AgentHarm; 80 attacks and 65 legitimate items over 4 contracts) and a
+model-generated, context-isolated set (secondary: 45 attacks and 42 legitimate items, one
+contract).
+- **External set:** attacks blocked 72/80 (90%, 95% CI 81–95) with or without the v0.4
+  extensions. The contracts' tool lists did that work, and they also blocked 56/65 legitimate
+  items whose tools are outside the allowed lists.
+- **Generated set:** deny patterns raised attacks blocked from 37/45 to 40/45 with 0/42
+  legitimate items blocked.
+- Deny patterns are wording heuristics. Semantic mode is monitor-only: the IDS did not separate
+  attacks from legitimate requests (ROC AUC 0.48 and 0.59).
+
+[Full results](https://github.com/Arshu-1104/RMIC/blob/main/experiment/eval_v0.4/results.md).
+
 **Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
 fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the
 sealed file. `Guard` warns when it seals an unsealed contract in memory; such hashes are
@@ -227,7 +241,7 @@ legal-review agent roles.
 
 ## Status
 
-This is an early (0.3.x) release from an active research project on
+This is an early (0.4.x) release from an active research project on
 role-boundary preservation in autonomous agents. APIs may change between
 minor versions until 1.0. Issues and contributions welcome on
 [GitHub](https://github.com/Arshu-1104/RMIC).

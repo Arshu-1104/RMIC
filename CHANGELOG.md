@@ -4,6 +4,8 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-21
+
 ### Added
 
 - **Contract hard-rule extensions** (all optional, validated at load, covered by the contract
@@ -80,6 +82,27 @@ All notable changes to `rmic-guard` are documented here.
 
 - The topic-embedding cache could return vectors from a previous embedding backend after
   `set_embedding_backend()`; cache keys now include the backend generation.
+
+### Repository
+
+Not part of the package.
+
+- `demo.py`, `preflight_check.py` and `seal_contracts.py` moved to `scripts/`.
+  `seal_contracts.py` refuses to rewrite the four frozen research contracts unless `--force` is
+  passed.
+- `run_rmic.py` moved to `ibm_pilot/run_single.py`, which no longer writes the contract file.
+- `contracts/_template_universal.json` replaced by `contracts/examples/template.json`, which
+  passes `rmic validate`. This changes the experiment's contract-manifest hash for future runs
+  only.
+- `prompts_v2/` and `prompts_v3/` moved to `prompts/v2/` and `prompts/v3/`. The v1 corpus and its
+  manifest hash are unchanged.
+- Every top-level folder has a README; the Repository Structure table is updated.
+- v0.4 evaluation sets, frozen with SHA-256 hashes:
+  - `prompts/external/`: public datasets, selected and mapped by rules committed before
+    selection;
+  - `prompts/v3/generated/`: model-generated, context-isolated, not human-blind; one contract.
+- One evaluation run on these sets, with no tuning: `experiment/eval_v0.4/` (plan, script,
+  results, raw CSVs).
 
 ## 0.3.0 — 2026-10-21
 
