@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from typing import Any, Mapping
 
-from core.exceptions import InvalidContractError
+from rmic_guard._core.exceptions import InvalidContractError
 
 __all__ = ["validate_contract_dict", "REQUIRED_FIELDS"]
 

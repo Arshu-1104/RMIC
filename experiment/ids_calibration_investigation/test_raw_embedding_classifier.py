@@ -20,7 +20,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from core.embedder import embed_texts
+from rmic_guard._core.embedder import embed_texts
 
 DB_PATH = "results/experiment_results.db"
 CONDITION = "C2_ids_only"

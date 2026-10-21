@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.tool_layer import ToolRegistry
+from rmic_guard._core.tool_layer import ToolRegistry
 
 
 class TestRegisterAndRetrieve:

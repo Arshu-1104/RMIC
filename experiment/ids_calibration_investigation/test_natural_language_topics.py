@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-from core.ids_metric import compute_ids_components
+from rmic_guard._core.ids_metric import compute_ids_components
 import json
 from pathlib import Path
 

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from utils.config import load_config
+from rmic_guard._utils.config import load_config
 
 ROOT = Path(__file__).resolve().parent
 
@@ -35,7 +35,7 @@ CONTRACT_FILES = (
     "legal_review_agent.json",
 )
 
-# Retired on api.anthropic.com (404) — keep in sync with core/reasoning_layer.py
+# Retired on api.anthropic.com (404) — keep in sync with rmic_guard/_core/reasoning_layer.py
 _RETIRED_ANTHROPIC_MODELS: frozenset[str] = frozenset(
     {
         "claude-3-sonnet-20240229",
@@ -126,7 +126,7 @@ def main() -> None:
         )
 
     # 3 — core modules
-    core_dir = ROOT / "core"
+    core_dir = ROOT / "rmic_guard" / "_core"
     missing_core = [f for f in CORE_FILES if not (core_dir / f).is_file()]
     if not missing_core:
         ok_line("All 8 core Python files are present")
@@ -165,7 +165,7 @@ def main() -> None:
     # 5 — local embedding model (fastembed ONNX preferred, sentence-transformers fallback)
     sys.path.insert(0, str(ROOT))
     try:
-        from core.embedder import embed_texts
+        from rmic_guard._core.embedder import embed_texts
 
         vec = embed_texts(["RMIC-Guard validation sentence."])
         shape = tuple(vec.shape)

@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
-from core.validation import validate_contract_dict
-from utils.config import load_config
+from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
+from rmic_guard._core.validation import validate_contract_dict
+from rmic_guard._utils.config import load_config
 
 __all__ = [
     "DataScope",
@@ -266,7 +266,7 @@ def seal_contract_file(
 
     anchor_embedding is the L2-normalised mean embedding of semantic_anchors.
     """
-    from core.embedder import anchor_centroid_from_anchors
+    from rmic_guard._core.embedder import anchor_centroid_from_anchors
 
     p = Path(path)
     try:
@@ -339,7 +339,7 @@ def create_contract(
 
     require_embedding: when True (default), computes anchor_embedding via a
     local sentence-embedding model (downloaded once on first use — see
-    core.embedder.set_embedding_backend to point at a pre-downloaded/offline
+    rmic_guard._core.embedder.set_embedding_backend to point at a pre-downloaded/offline
     model instead). Semantic drift detection (EnforcementMode "full" /
     "ids_only") needs this. Set to False to skip it entirely and produce a
     contract usable only in EnforcementMode "hard_rules_only" — useful for
@@ -347,7 +347,7 @@ def create_contract(
     enforcement, or for offline contract authoring before a model is
     available.
     """
-    from core.embedder import anchor_centroid_from_anchors
+    from rmic_guard._core.embedder import anchor_centroid_from_anchors
 
     cfg = load_config()
     tcfg = cfg.get("thresholds", {})

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.ids_metric import compute_ids_components
+from rmic_guard._core.ids_metric import compute_ids_components
 
 
 def _semantic_cloaking_prompt(base: str, malicious_suffix: str) -> str:

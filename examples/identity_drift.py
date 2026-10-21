@@ -11,7 +11,7 @@ NOT an LLM API call, but it IS a one-time model download on first run:
 
 If you're offline, or want a fully deterministic/network-free run (e.g.
 in CI), point RMIC-Guard at your own embedding function instead via
-core.embedder.set_embedding_backend() -- see the OFFLINE_MODE flag below.
+rmic_guard._core.embedder.set_embedding_backend() -- see the OFFLINE_MODE flag below.
 
     python examples/identity_drift.py
 """
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-from core.planning import PlannedToolCall
+from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard import EnforcementEngine, RMICContract, ToolRegistry
 
 # Set OFFLINE_MODE=1 in your environment to skip the real model download
@@ -33,7 +33,7 @@ OFFLINE_MODE = os.environ.get("OFFLINE_MODE") == "1"
 def _install_offline_embedding_backend() -> None:
     import numpy as np
 
-    from core.embedder import set_embedding_backend
+    from rmic_guard._core.embedder import set_embedding_backend
 
     dim = 64
 

@@ -11,13 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
 
-from core.audit_ledger import AuditEntry, AuditLedger, hash_text
-from core.contract_loader import RMICContract
-from core.ids_engine import IDSEngine
-from core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
-from core.planning import PlannedToolCall
-from core.tool_layer import ToolRegistry, ToolResult
-from utils.config import load_config
+from rmic_guard._core.audit_ledger import AuditEntry, AuditLedger, hash_text
+from rmic_guard._core.contract_loader import RMICContract
+from rmic_guard._core.ids_engine import IDSEngine
+from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
+from rmic_guard._core.planning import PlannedToolCall
+from rmic_guard._core.tool_layer import ToolRegistry, ToolResult
+from rmic_guard._utils.config import load_config
 
 __all__ = ["EnforcementEngine", "EnforcementMode", "EnforcementOutcome"]
 

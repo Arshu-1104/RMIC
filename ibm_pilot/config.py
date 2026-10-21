@@ -3,7 +3,7 @@ Configuration for the IBM watsonx Orchestrate pilot.
 
 This module defines paths and constants only. It does not implement any
 enforcement, contract-loading, or audit logic — that logic already exists
-in `core/` and is reused as-is by `ibm_pilot/rmic_guard_tool.py`.
+in `rmic_guard/_core/` and is reused as-is by `ibm_pilot/rmic_guard_tool.py`.
 
 Run from the repository root, e.g.:
     python ibm_pilot/demo.py
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.enforcement_engine import EnforcementMode
+from rmic_guard._core.enforcement_engine import EnforcementMode
 
 __all__ = [
     "REPO_ROOT",
@@ -60,13 +60,13 @@ CONTRACT_PATHS: dict[str, Path] = {
 DEFAULT_CONTRACT_PATH: Path = CONTRACT_PATHS["financial_agent"]
 
 # financial_agent.json ships already sealed (contract_hash + anchor_embedding
-# present and verified against core.contract_loader.load_contract during
+# present and verified against rmic_guard._core.contract_loader.load_contract during
 # analysis), so the pilot verifies the hash rather than re-sealing on every
 # run the way demo.py's write_back=False re-embedding does.
 VERIFY_CONTRACT_HASH: bool = True
 
 # ── Audit logging ───────────────────────────────────────────────────────────
-# Reuses core.audit_ledger.AuditLedger. Follows the same results/*.jsonl
+# Reuses rmic_guard._core.audit_ledger.AuditLedger. Follows the same results/*.jsonl
 # convention as demo.py's results/demo_audit.jsonl.
 RESULTS_DIR: Path = REPO_ROOT / "results"
 AUDIT_LOG_PATH: Path = RESULTS_DIR / "ibm_pilot_audit.jsonl"
@@ -74,7 +74,7 @@ AUDIT_LOG_PATH: Path = RESULTS_DIR / "ibm_pilot_audit.jsonl"
 # ── Enforcement ──────────────────────────────────────────────────────────────
 # "full" = Pass 1 (hard rules) + Pass 2 (IDS composite), matching the
 # repository's default EnforcementMode. Reused directly from
-# core.enforcement_engine — not redefined here.
+# rmic_guard._core.enforcement_engine — not redefined here.
 ENFORCEMENT_MODE: EnforcementMode = "full"
 
 # ── IBM watsonx Orchestrate identifiers ─────────────────────────────────────

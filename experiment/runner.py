@@ -36,8 +36,8 @@ from typing import Any
 
 from litellm import RateLimitError
 from dotenv import load_dotenv
-from utils.config import load_config
-from core.integrity_manifest import compute_contract_manifest, compute_prompt_manifest
+from rmic_guard._utils.config import load_config
+from rmic_guard._core.integrity_manifest import compute_contract_manifest, compute_prompt_manifest
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[1]
@@ -202,7 +202,7 @@ def load_all_prompts() -> tuple[list[dict[str, Any]], dict[str, list[dict[str, A
 
 
 def load_contract(role: str):
-    from core.contract_loader import load_contract as _load
+    from rmic_guard._core.contract_loader import load_contract as _load
     path = CONTRACTS_DIR / f"{role}.json"
     if not path.exists():
         raise FileNotFoundError(f"Contract not found: {path}")
@@ -367,9 +367,9 @@ def run_experiment(
     models_to_run: list[str] | None = None,
     single_model: str | None = None,
 ) -> tuple[str, int]:
-    from core.reasoning_layer import ClaudeReasoning, GroqReasoning
-    from core.enforcement_engine import EnforcementEngine
-    from core.tool_layer import ToolRegistry
+    from rmic_guard._core.reasoning_layer import ClaudeReasoning, GroqReasoning
+    from rmic_guard._core.enforcement_engine import EnforcementEngine
+    from rmic_guard._core.tool_layer import ToolRegistry
 
     global _tool_history_per_role_condition
     _tool_history_per_role_condition = {}

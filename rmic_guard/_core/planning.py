@@ -2,9 +2,9 @@
 backend, plus pure-Python JSON parsing/validation of that plan.
 
 Deliberately has NO dependency on litellm/anthropic/groq: PlannedToolCall
-is consumed by core.enforcement_engine (core SDK functionality) and must
+is consumed by rmic_guard._core.enforcement_engine (core SDK functionality) and must
 stay importable without the optional LLM integration extras installed.
-Only core.reasoning_layer (which talks to actual model APIs) depends on
+Only rmic_guard._core.reasoning_layer (which talks to actual model APIs) depends on
 litellm; it imports these primitives from here.
 """
 

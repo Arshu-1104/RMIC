@@ -5,7 +5,7 @@ autonomous LLM agents.
 Beginner quickstart (no LLM API key required to see PASS/BLOCK):
 
     from rmic_guard import RMICContract, ToolRegistry, EnforcementEngine
-    from core.planning import PlannedToolCall
+    from rmic_guard._core.planning import PlannedToolCall
 
     contract = RMICContract.create(
         agent_id="research-agent",
@@ -42,12 +42,12 @@ With an LLM in the loop:
 This package is a stable public import surface over the existing `core`
 implementation — nothing here is reimplemented, it's re-exported (plus the
 beginner-facing RMICContract.create(...) factory and the SDK exception
-hierarchy, which live in core/contract_loader.py and core/exceptions.py
+hierarchy, which live in rmic_guard/_core/contract_loader.py and rmic_guard/_core/exceptions.py
 respectively so they stay import-cycle-free).
 """
 from __future__ import annotations
 
-from core.contract_loader import (
+from rmic_guard._core.contract_loader import (
     DataScope,
     ParameterConstraint,
     RMICContract,
@@ -60,12 +60,12 @@ from core.contract_loader import (
     seal_contract_file,
     verify_contract,
 )
-from core.enforcement_engine import (
+from rmic_guard._core.enforcement_engine import (
     EnforcementEngine,
     EnforcementMode,
     EnforcementOutcome,
 )
-from core.exceptions import (
+from rmic_guard._core.exceptions import (
     ContractIntegrityError,
     ContractNotSealedError,
     EnforcementConfigError,
@@ -74,25 +74,25 @@ from core.exceptions import (
     ToolExecutionNotApprovedError,
     ToolNotRegisteredError,
 )
-from core.ids_engine import IDSEngine
-from core.planning import PlannedToolCall
-from core.tool_layer import ToolRegistry, ToolResult
-from core.validation import validate_contract_dict
+from rmic_guard._core.ids_engine import IDSEngine
+from rmic_guard._core.planning import PlannedToolCall
+from rmic_guard._core.tool_layer import ToolRegistry, ToolResult
+from rmic_guard._core.validation import validate_contract_dict
 
-# core.reasoning_layer pulls in litellm (an optional "LLM integration"
+# rmic_guard._core.reasoning_layer pulls in litellm (an optional "LLM integration"
 # dependency — see pyproject.toml's [anthropic]/[groq]/[llm] extras). A
 # pure enforcement/contract user (`pip install rmic-guard`, no extras)
 # should not be forced to have litellm installed just to import this
 # package, so these three names are loaded lazily via module __getattr__
 # below instead of at import time. PlannedToolCall itself is litellm-free
-# (it lives in core.planning) and is imported eagerly above.
+# (it lives in rmic_guard._core.planning) and is imported eagerly above.
 _LAZY_REASONING_NAMES = {"ClaudeReasoning", "GroqReasoning", "ReasoningLayer"}
 
 
 def __getattr__(name: str):  # PEP 562 lazy attribute access
     if name in _LAZY_REASONING_NAMES:
         try:
-            from core import reasoning_layer
+            from rmic_guard._core import reasoning_layer
         except ImportError as exc:  # pragma: no cover - exercised only without extras
             raise ImportError(
                 f"rmic_guard.{name} requires the optional LLM integration dependencies. "

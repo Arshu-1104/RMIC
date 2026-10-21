@@ -70,16 +70,13 @@ rmic = "rmic_guard.cli:main"
 Homepage = "https://github.com/Arshu-1104/RMIC"
 Repository = "https://github.com/Arshu-1104/RMIC"
 
-[tool.setuptools]
-# NOTE: `core` and `utils` are shipped as top-level importable packages
-# alongside `rmic_guard`, because core/*.py uses absolute imports like
-# `from core.enforcement_engine import ...` internally. This is a fast V1 —
-# these are generic names that could collide with other packages in a
-# user's environment. A cleaner V2 would rename these (e.g. to
-# rmic_guard_core / rmic_guard_utils) and update all internal imports
-# across experiment/, dashboard/, and baselines/ to match — a larger
-# refactor, intentionally deferred so it doesn't block this release.
-packages = ["rmic_guard", "core", "utils"]
+[tool.setuptools.packages.find]
+# Only the rmic_guard namespace is shipped. The implementation lives in the
+# private subpackages rmic_guard._core / rmic_guard._utils (until v0.2.0 they
+# were shipped as top-level `core` / `utils` packages, which collided with
+# any user project that had its own utils.py or core/ package). Research
+# code in experiment/, baselines/, dashboard/, ibm_pilot/ is never shipped.
+include = ["rmic_guard*"]
 
 [tool.setuptools.package-data]
 # py.typed: PEP 561 marker (empty file) so type checkers treat this package

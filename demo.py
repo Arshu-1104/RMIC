@@ -13,11 +13,11 @@ from pathlib import Path
 from anthropic import APIConnectionError, APIStatusError, AuthenticationError
 from dotenv import load_dotenv
 
-from core.audit_ledger import AuditLedger
-from core.contract_loader import seal_contract_file
-from core.enforcement_engine import EnforcementEngine, EnforcementOutcome
-from core.reasoning_layer import ReasoningLayer
-from core.tool_layer import ToolRegistry
+from rmic_guard._core.audit_ledger import AuditLedger
+from rmic_guard._core.contract_loader import seal_contract_file
+from rmic_guard._core.enforcement_engine import EnforcementEngine, EnforcementOutcome
+from rmic_guard._core.reasoning_layer import ReasoningLayer
+from rmic_guard._core.tool_layer import ToolRegistry
 
 ROOT = Path(__file__).resolve().parent
 

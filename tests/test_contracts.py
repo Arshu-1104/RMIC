@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from core.contract_loader import RMICContract, load_contract, seal_contract_file
-from core.exceptions import InvalidContractError
+from rmic_guard._core.contract_loader import RMICContract, load_contract, seal_contract_file
+from rmic_guard._core.exceptions import InvalidContractError
 
 
 def _anchors() -> list[str]:

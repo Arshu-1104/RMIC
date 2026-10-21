@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from core.contract_loader import RMICContract, compute_contract_hash, load_contract, verify_contract
-from core.exceptions import ContractIntegrityError, ContractNotSealedError
+from rmic_guard._core.contract_loader import RMICContract, compute_contract_hash, load_contract, verify_contract
+from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError
 
 
 def _write_sealed_contract(tmp_path: Path) -> Path:

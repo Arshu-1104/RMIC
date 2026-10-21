@@ -26,7 +26,7 @@ DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # fastembed model name
 # the "embedding_provider=..." escape hatch so a caller can make first-run
 # network behaviour explicit instead of implicit.
 #
-#     from core.embedder import set_embedding_backend
+#     from rmic_guard._core.embedder import set_embedding_backend
 #     set_embedding_backend(lambda texts: my_own_embed_fn(texts))
 #
 # The callable takes list[str] and must return an (n, dim) float32 array;

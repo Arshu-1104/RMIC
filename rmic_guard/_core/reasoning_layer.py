@@ -12,15 +12,15 @@ try:
     from litellm import RateLimitError
 except ImportError as _exc:  # pragma: no cover - exercised only without extras
     raise ImportError(
-        "core.reasoning_layer requires the optional LLM integration dependencies "
+        "rmic_guard._core.reasoning_layer requires the optional LLM integration dependencies "
         '(litellm). Install with: pip install "rmic-guard[llm]" (or [anthropic] / [groq]). '
         "Core contract/enforcement functionality (rmic_guard.RMICContract, "
         "rmic_guard.EnforcementEngine, rmic_guard.ToolRegistry, ...) does not require this."
     ) from _exc
 
-from core.contract_loader import RMICContract
-from core.planning import PlannedToolCall, ResponseValidator, parse_planned_json
-from utils.config import load_config
+from rmic_guard._core.contract_loader import RMICContract
+from rmic_guard._core.planning import PlannedToolCall, ResponseValidator, parse_planned_json
+from rmic_guard._utils.config import load_config
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
