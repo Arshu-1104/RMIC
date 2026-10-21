@@ -7,11 +7,16 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from anthropic import APIConnectionError, APIStatusError, AuthenticationError
 from dotenv import load_dotenv
+
+# The SDK only reads a config file named explicitly (v0.3+); research
+# scripts opt in to the repo's config.yaml here, before touching the SDK.
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[0] / "config.yaml"))
 
 from rmic_guard._core.audit_ledger import AuditLedger
 from rmic_guard._core.contract_loader import seal_contract_file

@@ -12,6 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
+# The SDK only reads a config file named explicitly (v0.3+); research
+# scripts opt in to the repo's config.yaml here, before touching the SDK.
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[1] / "config.yaml"))
+
 from rmic_guard._core.enforcement_engine import EnforcementMode
 
 __all__ = [

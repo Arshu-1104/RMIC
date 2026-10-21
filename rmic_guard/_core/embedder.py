@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from rmic_guard._core.exceptions import RMICGuardError
+
 __all__ = [
     "DEFAULT_MODEL_NAME",
     "anchor_centroid_from_anchors",
@@ -18,7 +20,7 @@ __all__ = [
     "set_embedding_backend",
 ]
 
-DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # fastembed model name
+DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # fastembed model name; downloaded once on first semantic use
 
 # Optional injection point: point this at a pre-downloaded/offline model, a
 # remote embedding API, or a deterministic stub for tests — without touching
@@ -49,39 +51,56 @@ def get_embedding_backend() -> Any | None:
     return _embedding_backend
 
 
+_INSTALL_HINT = (
+    'Install one with `pip install rmic-guard` (ships fastembed) or '
+    '`pip install "rmic-guard[torch]"` (sentence-transformers), or skip semantic '
+    "drift detection entirely with Guard(..., semantic=False) / "
+    "RMICContract.create(..., require_embedding=False) (hard rules only, no model, no network)."
+)
+
+
 @lru_cache(maxsize=4)
 def get_model(model_name: str | None = None) -> Any:
-    """Return a fastembed TextEmbedding model, or SentenceTransformer if fastembed is unavailable."""
+    """Return a fastembed TextEmbedding model, or SentenceTransformer if fastembed is unavailable.
+
+    Raises RMICGuardError (not a bare ModuleNotFoundError) when neither
+    backend can be imported.
+    """
     resolved_name = model_name or DEFAULT_MODEL_NAME
-    # First call per model_name downloads it once, then fastembed/HF caches
-    # it locally -- this print makes that first-run pause visible instead of
-    # a silent multi-second/minute hang with no feedback.
-    print(
-        f"[rmic-guard] Loading embedding model '{resolved_name}' "
-        f"(first run downloads it once, then it's cached locally)...",
-        flush=True,
-    )
+    fastembed_problem: BaseException | None = None
     try:
         from fastembed import TextEmbedding
+    except ImportError as exc:
+        fastembed_problem = exc
+    else:
+        # First call per model_name downloads it once, then fastembed/HF caches
+        # it locally -- this print makes that first-run pause visible instead of
+        # a silent multi-second/minute hang with no feedback.
+        print(
+            f"[rmic-guard] Loading embedding model '{resolved_name}' "
+            f"(first run downloads it once, then it's cached locally)...",
+            flush=True,
+        )
+        try:
+            return TextEmbedding(resolved_name)
+        except OSError as exc:
+            fastembed_problem = exc
 
-        return TextEmbedding(resolved_name)
-    except (ImportError, OSError):
+    try:
         from sentence_transformers import SentenceTransformer as ST
+    except ImportError as exc:
+        if isinstance(fastembed_problem, ImportError):
+            reason = "neither fastembed nor sentence-transformers is installed"
+        else:
+            reason = (
+                f"fastembed could not load '{resolved_name}' ({fastembed_problem}) and "
+                "sentence-transformers is not installed as a fallback"
+            )
+        raise RMICGuardError(
+            f"Semantic drift detection needs a local embedding model, but {reason}. {_INSTALL_HINT}"
+        ) from exc
 
-        return ST(model_name or "all-MiniLM-L6-v2")
-
-
-def _embed_with_sentence_transformers(texts: list[str], model_name: str | None) -> np.ndarray:
-    from sentence_transformers import SentenceTransformer
-
-    model_st = SentenceTransformer(model_name or "all-MiniLM-L6-v2")
-    emb = model_st.encode(
-        texts,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-        show_progress_bar=False,
-    )
-    return np.asarray(emb, dtype=np.float32)
+    return ST(model_name or "all-MiniLM-L6-v2")
 
 
 def embed_texts(texts: list[str], model_name: str | None = None) -> np.ndarray:
@@ -90,22 +109,20 @@ def embed_texts(texts: list[str], model_name: str | None = None) -> np.ndarray:
         return np.zeros((0, 0), dtype=np.float32)
     if _embedding_backend is not None:
         arr = np.asarray(_embedding_backend(texts), dtype=np.float32)
-        norms = np.linalg.norm(arr, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1.0, norms)
-        return (arr / norms).astype(np.float32)
-    try:
-        # FIXED: was instantiating TextEmbedding(...) fresh on every call,
-        # reloading the ONNX model/tokenizer/session from disk each time.
-        # Reuse the lru_cache'd instance from get_model() instead -- this
-        # is the difference between ~1-3s and ~1-3ms per call once warm.
+    else:
+        # get_model() is lru_cache'd: reusing the instance is the difference
+        # between ~1-3s and ~1-3ms per call once warm.
         model = get_model(model_name)
-        embeddings = list(model.embed(texts))
-        arr = np.array(embeddings, dtype=np.float32)
-        norms = np.linalg.norm(arr, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1.0, norms)
-        return (arr / norms).astype(np.float32)
-    except (ImportError, OSError):
-        return _embed_with_sentence_transformers(texts, model_name)
+        if hasattr(model, "embed"):  # fastembed
+            arr = np.array(list(model.embed(texts)), dtype=np.float32)
+        else:  # sentence-transformers fallback
+            arr = np.asarray(
+                model.encode(texts, convert_to_numpy=True, show_progress_bar=False),
+                dtype=np.float32,
+            )
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    return (arr / norms).astype(np.float32)
 
 
 def normalise_l2(v: np.ndarray) -> np.ndarray:

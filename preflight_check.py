@@ -13,6 +13,10 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+# The SDK only reads a config file named explicitly (v0.3+); research
+# scripts opt in to the repo's config.yaml here, before touching the SDK.
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[0] / "config.yaml"))
+
 from rmic_guard._utils.config import load_config
 
 ROOT = Path(__file__).resolve().parent

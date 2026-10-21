@@ -17,7 +17,7 @@ from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
 from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry, ToolResult
-from rmic_guard._utils.config import load_config
+from rmic_guard._utils.config import load_user_config
 
 __all__ = ["EnforcementEngine", "EnforcementMode", "EnforcementOutcome"]
 
@@ -117,6 +117,17 @@ def _ids_on_plan(
         raise ValueError("contract missing anchor_embedding — run seal_contract_file first")
     text_for_ids = f"{plan.tool_name} {plan.arguments} {plan.raw_text}"
     allowed_topics = list(contract.semantic_anchors)
+    # TODO: forbidden_topics is intentionally empty. Until 22 Sep 2026 (PR #5)
+    # it was filled with contract.data_scope.prohibited + forbidden_actions.
+    # This matters for the paper's numbers: semantic_grounding is
+    # 1 - (sim(allowed) - sim(forbidden)), so with no forbidden topics it loses
+    # the +sim(forbidden) term and Base IDS drops for practically every input
+    # (bge similarities are positive); the mahalanobis/KL/JS/wasserstein/
+    # hellinger signals also change, since they embed allowed + forbidden
+    # topics. IDS results produced before 22 Sep are therefore not
+    # reproducible with this code: re-run the experiment, or state which
+    # version produced the figures, before citing them. Re-populating this
+    # list is a scoring change that needs re-calibration.
     forbidden_topics: list[str] = []
     components = IDSEngine().score(
         text_for_ids,
@@ -149,8 +160,10 @@ class EnforcementEngine:
         self.ledger = ledger
         self.log_async = log_async
         self._tool_approval_token = tools.issue_approval_token()
-        cfg = load_config()
-        tcfg = cfg.get("thresholds", {})
+        # The contract's own thresholds are authoritative. A config file only
+        # overrides them when one was named explicitly (path / RMIC_CONFIG) and
+        # actually sets the key -- built-in defaults never mask contract values.
+        tcfg = load_user_config().get("thresholds") or {}
         self.ids_warn_threshold = float(tcfg.get("warn_threshold", contract.ids_warn_threshold))
         self.ids_block_threshold = float(tcfg.get("block_threshold", contract.ids_block_threshold))
         self.drift_velocity_threshold = float(

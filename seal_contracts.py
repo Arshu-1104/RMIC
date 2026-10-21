@@ -62,7 +62,7 @@ def main() -> None:
     for p in paths:
         if seal_contract_file is not None:
             try:
-                sealed = seal_contract_file(p)
+                sealed = seal_contract_file(p, write_back=True)
                 print(
                     f"Sealed (real embeddings via {be}): {sealed.agent_id}: "
                     f"{sealed.contract_hash[:16]}..."

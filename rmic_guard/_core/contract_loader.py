@@ -229,18 +229,7 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
     )
 
 
-def load_contract(
-    path: str | Path,
-    *,
-    verify_hash: bool = True,
-    auto_seal: bool = True,
-) -> RMICContract:
-    """Load a contract JSON file.
-
-    When ``auto_seal=True``, an unsealed contract is automatically sealed
-    before loading. Existing sealed contracts are still integrity-verified.
-    """
-    p = Path(path)
+def _read_contract_json(p: Path) -> dict[str, Any]:
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -248,50 +237,91 @@ def load_contract(
 
     if not isinstance(raw, dict):
         raise InvalidContractError(["contract file must contain a JSON object"], source=str(p))
+    return raw
 
+
+def _write_contract_json(p: Path, data: Mapping[str, Any]) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _seal_dict(
+    data: Mapping[str, Any],
+    *,
+    source: str | None,
+    model_name: str | None = None,
+    require_embedding: bool = True,
+) -> dict[str, Any]:
+    """Return a sealed copy of a raw contract dict (never mutates ``data``).
+
+    Validates the pre-seal shape, computes anchor_embedding (when
+    require_embedding) and contract_hash, and fills created_at if missing.
+    """
+    sealed = {k: v for k, v in dict(data).items() if k not in ("anchor_embedding", "contract_hash")}
+    validate_contract_dict(sealed, source=source)
+
+    if require_embedding:
+        from rmic_guard._core.embedder import anchor_centroid_from_anchors
+
+        anchors = _as_tuple_str(sealed.get("semantic_anchors"))
+        centroid = anchor_centroid_from_anchors(list(anchors), model_name=model_name)
+        sealed["anchor_embedding"] = [float(x) for x in centroid.tolist()]
+
+    if sealed.get("created_at") in (None, ""):
+        sealed["created_at"] = datetime.now(timezone.utc).isoformat()
+
+    sealed["contract_hash"] = compute_contract_hash(sealed)
+    return sealed
+
+
+def load_contract(
+    path: str | Path,
+    *,
+    verify_hash: bool = True,
+    auto_seal: bool = True,
+    write_back: bool = False,
+    require_embedding: bool = True,
+    model_name: str | None = None,
+) -> RMICContract:
+    """Load a contract JSON file, validate it, and optionally verify SHA-256 integrity.
+
+    auto_seal (default True): when the file has no contract_hash yet, seal it
+    on load (embed anchors when require_embedding, hash) instead of raising
+    ContractNotSealedError; pass auto_seal=False to get that error instead.
+    Sealing happens in memory only; the file on disk is rewritten only if
+    write_back=True as well. A file that already carries a contract_hash is
+    never re-sealed -- it is verified, so tampering is still detected.
+    """
+    p = Path(path)
+    raw = _read_contract_json(p)
     if auto_seal and not raw.get("contract_hash"):
-        return seal_contract_file(p, write_back=True)
-
+        sealed = _seal_dict(raw, source=str(p), model_name=model_name, require_embedding=require_embedding)
+        if write_back:
+            _write_contract_json(p, sealed)
+        return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
     return _contract_from_dict(raw, require_hash_match=verify_hash, source=str(p))
 
 
 def seal_contract_file(
     path: str | Path,
     *,
-    write_back: bool = True,
+    write_back: bool = False,
     model_name: str | None = None,
 ) -> RMICContract:
     """
-    Compute anchor_embedding (once) and contract_hash, optionally persist to disk.
+    Compute anchor_embedding and contract_hash; optionally persist to disk.
 
     anchor_embedding is the L2-normalised mean embedding of semantic_anchors.
+
+    Behaviour change in v0.3.0: write_back now defaults to False, so the
+    sealed contract is returned in memory and the file on disk is left
+    untouched. Pass write_back=True (or run `rmic seal <file>`) to persist it.
     """
-    from rmic_guard._core.embedder import anchor_centroid_from_anchors
-
     p = Path(path)
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise InvalidContractError([f"file is not valid JSON: {exc}"], source=str(p)) from exc
-    if not isinstance(data, dict):
-        raise InvalidContractError(["contract file must contain a JSON object"], source=str(p))
-
-    # Validate the pre-seal shape (anchor_embedding/contract_hash aren't required yet).
-    validate_contract_dict({k: v for k, v in data.items() if k not in ("anchor_embedding", "contract_hash")}, source=str(p))
-
-    anchors = _as_tuple_str(data.get("semantic_anchors"))
-    centroid = anchor_centroid_from_anchors(list(anchors), model_name=model_name)
-    data["anchor_embedding"] = [float(x) for x in centroid.tolist()]
-
-    if data.get("created_at") in (None, ""):
-        data["created_at"] = datetime.now(timezone.utc).isoformat()
-
-    data["contract_hash"] = compute_contract_hash(data)
-
+    sealed = _seal_dict(_read_contract_json(p), source=str(p), model_name=model_name)
     if write_back:
-        p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-    return _contract_from_dict(data, require_hash_match=True, source=str(p))
+        _write_contract_json(p, sealed)
+    return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
 
 
 def verify_contract(path: str | Path) -> bool:

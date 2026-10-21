@@ -18,6 +18,13 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
+import os
+from pathlib import Path as _Path
+
+# The SDK only reads a config file named explicitly (v0.3+); research
+# scripts opt in to the repo's config.yaml here, before touching the SDK.
+os.environ.setdefault("RMIC_CONFIG", str(_Path(__file__).resolve().parents[2] / "config.yaml"))
+
 from rmic_guard._core.ids_metric import compute_ids_components
 import json
 from pathlib import Path

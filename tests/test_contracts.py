@@ -92,11 +92,37 @@ class TestAdvancedAPI:
             "agent_id": "a", "role_name": "A", "sector": "s",
             "semantic_anchors": _anchors(),
         }))
-        sealed = seal_contract_file(raw)
+        sealed = seal_contract_file(raw, write_back=True)
         assert sealed.contract_hash
         assert len(sealed.anchor_embedding) > 0
         on_disk = json.loads(raw.read_text())
         assert on_disk["contract_hash"] == sealed.contract_hash
+
+    def test_seal_contract_file_default_does_not_touch_disk(self, tmp_path: Path) -> None:
+        raw = tmp_path / "unsealed.json"
+        original = json.dumps({
+            "agent_id": "a", "role_name": "A", "sector": "s",
+            "semantic_anchors": _anchors(),
+        })
+        raw.write_text(original)
+        sealed = seal_contract_file(raw)
+        assert sealed.contract_hash and len(sealed.anchor_embedding) > 0
+        assert raw.read_text() == original
+
+    def test_load_contract_auto_seal_in_memory_by_default(self, tmp_path: Path) -> None:
+        raw = tmp_path / "unsealed.json"
+        original = json.dumps({
+            "agent_id": "a", "role_name": "A", "sector": "s",
+            "semantic_anchors": _anchors(),
+        })
+        raw.write_text(original)
+        loaded = load_contract(raw, auto_seal=True)
+        assert loaded.contract_hash and len(loaded.anchor_embedding) > 0
+        assert raw.read_text() == original
+
+        persisted = load_contract(raw, auto_seal=True, write_back=True)
+        assert json.loads(raw.read_text())["contract_hash"] == persisted.contract_hash
+        assert load_contract(raw).contract_hash == persisted.contract_hash
 
     def test_load_contract_missing_field_raises_invalid_contract_error(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.json"

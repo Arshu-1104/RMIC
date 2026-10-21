@@ -1,7 +1,20 @@
-"""Configuration loader with safe defaults for RMIC-Guard."""
+"""Configuration loader with safe defaults for RMIC-Guard.
+
+The SDK only reads a YAML config when one is named explicitly -- either as
+the ``path`` argument or via the ``RMIC_CONFIG`` environment variable. It
+never picks up a ``config.yaml`` from the current working directory: until
+v0.2.0 it did, so any unrelated config.yaml in a user's project silently
+changed RMIC thresholds and IDS weights.
+
+The research scripts in this repository (experiment/, baselines/,
+ibm_pilot/, demo.py, preflight_check.py) opt in to the repo's config.yaml by
+setting RMIC_CONFIG before they touch the SDK.
+"""
 
 from __future__ import annotations
 
+import copy
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -71,12 +84,49 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-@lru_cache(maxsize=1)
-def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
-    cfg_path = Path(path)
-    data: dict[str, Any] = {}
-    if cfg_path.exists():
-        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            data = raw
-    return _deep_merge(DEFAULT_CONFIG, data)
+CONFIG_ENV_VAR = "RMIC_CONFIG"
+
+
+def _resolve_config_path(path: str | Path | None) -> Path | None:
+    if path is not None:
+        return Path(path)
+    env = (os.environ.get(CONFIG_ENV_VAR) or "").strip()
+    return Path(env) if env else None
+
+
+@lru_cache(maxsize=8)
+def _read_config_file(path_str: str) -> dict[str, Any]:
+    cfg_path = Path(path_str)
+    if not cfg_path.is_file():
+        raise FileNotFoundError(
+            f"RMIC config file not found: {cfg_path} "
+            f"(passed explicitly or via the {CONFIG_ENV_VAR} environment variable)"
+        )
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    return raw if isinstance(raw, dict) else {}
+
+
+def load_user_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Return only the explicitly configured values (no defaults merged in).
+
+    Empty when neither ``path`` nor ``RMIC_CONFIG`` is set. Callers use this
+    to tell "the user configured X" apart from "X is a built-in default".
+    """
+    resolved = _resolve_config_path(path)
+    if resolved is None:
+        return {}
+    return copy.deepcopy(_read_config_file(str(resolved)))
+
+
+def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """DEFAULT_CONFIG deep-merged with the explicit config (if any)."""
+    return _deep_merge(copy.deepcopy(DEFAULT_CONFIG), load_user_config(path))
+
+
+def clear_config_cache() -> None:
+    """Forget cached config file contents (e.g. after editing the file)."""
+    _read_config_file.cache_clear()
+
+
+# Backwards compatibility: load_config used to be an lru_cache'd function.
+load_config.cache_clear = clear_config_cache  # type: ignore[attr-defined]

@@ -36,6 +36,10 @@ from typing import Any
 
 from litellm import RateLimitError
 from dotenv import load_dotenv
+# The SDK only reads a config file named explicitly (v0.3+); research
+# scripts opt in to the repo's config.yaml here, before touching the SDK.
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[1] / "config.yaml"))
+
 from rmic_guard._utils.config import load_config
 from rmic_guard._core.integrity_manifest import compute_contract_manifest, compute_prompt_manifest
 
