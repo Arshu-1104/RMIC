@@ -152,6 +152,10 @@ python ibm_pilot/demo.py
 
 Running the demo executes the four scenarios described in Section 4 against the existing RMIC enforcement engine via the IBM pilot adapter, printing the expected and actual ALLOW/BLOCK decision for each scenario.
 
+For a single request through the adapter (support_agent, no API key needed), run
+`python ibm_pilot/run_single.py`. It verifies the sealed contract (or seals an
+unsealed one in memory) and never writes the contract file.
+
 ## 8. Running Tests
 
 Set the Python path:
