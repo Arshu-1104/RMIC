@@ -14,7 +14,11 @@ Three optional contract fields, all covered by the contract hash:
                    prohibited terms (whole word, case-insensitive).
                      {"packs": ["role_reassignment", {"name": "objective_override", "action": "warn"}],
                       "custom": [{"id": "crypto", "regex": "\\bcrypto\\b", "action": "block"}],
-                      "prohibited_terms": {"terms": ["tax return"], "action": "block"}}
+                      "prohibited_terms": {"terms": ["tax return"], "action": "block"},
+                      "max_scan_chars": 10000}
+                   Only the first max_scan_chars characters of the message are
+                   scanned; longer messages get a deny_pattern_scan_truncated
+                   warning.
 
 Deny patterns are heuristics: they catch explicit wording and miss rewordings.
 Everything here is deterministic; nothing uses embeddings.
@@ -30,6 +34,7 @@ from typing import Any, Mapping
 __all__ = [
     "ACTIONS",
     "DEFAULT_MAX_ARGUMENT_LENGTH",
+    "DEFAULT_MAX_SCAN_CHARS",
     "DENY_PATTERN_PACKS",
     "MAX_PATTERN_LENGTH",
     "ArgumentRule",
@@ -45,6 +50,7 @@ __all__ = [
 MAX_PATTERN_LENGTH = 500  # characters per regex in a contract
 DEFAULT_MAX_ARGUMENT_LENGTH = 1024  # characters of an argument value a pattern is run against
 MAX_TERM_LENGTH = 200
+DEFAULT_MAX_SCAN_CHARS = 10_000  # characters of the user message deny patterns scan
 ACTIONS = ("block", "warn")
 _PATTERN_ID = re.compile(r"[a-z0-9_]{1,64}")
 
@@ -272,6 +278,11 @@ class DenyRule:
 class DenyPatternConfig:
     rules: tuple[DenyRule, ...]
     raw_json: str = field(repr=False, compare=False)
+    max_scan_chars: int = DEFAULT_MAX_SCAN_CHARS
+
+    @property
+    def truncation_note(self) -> str:
+        return f"deny_pattern_scan_truncated:{self.max_scan_chars}"
 
 
 def _term_id(term: str) -> str:
@@ -294,12 +305,21 @@ def parse_deny_patterns(raw: Any, *, problems: list[str] | None = None) -> DenyP
 def _parse_deny_patterns(raw: Any, problems: list[str]) -> DenyPatternConfig | None:
     if raw is None:
         return None
-    if not isinstance(raw, Mapping) or not raw:
+    if not isinstance(raw, Mapping):
         problems.append("deny_patterns: must be a non-empty object with packs, custom and/or prohibited_terms")
         return None
-    unknown = set(raw) - {"packs", "custom", "prohibited_terms"}
+    unknown = set(raw) - {"packs", "custom", "prohibited_terms", "max_scan_chars"}
     if unknown:
-        problems.append(f"deny_patterns: unknown keys {sorted(unknown)} (expected packs, custom, prohibited_terms)")
+        problems.append(
+            f"deny_patterns: unknown keys {sorted(unknown)} (expected packs, custom, prohibited_terms, max_scan_chars)"
+        )
+    if not set(raw) & {"packs", "custom", "prohibited_terms"}:
+        problems.append("deny_patterns: must be a non-empty object with packs, custom and/or prohibited_terms")
+        return None
+    max_scan_chars = raw.get("max_scan_chars", DEFAULT_MAX_SCAN_CHARS)
+    if isinstance(max_scan_chars, bool) or not isinstance(max_scan_chars, int) or max_scan_chars < 1:
+        problems.append(f"deny_patterns.max_scan_chars: must be a positive integer, got {max_scan_chars!r}")
+        max_scan_chars = DEFAULT_MAX_SCAN_CHARS
     rules: list[DenyRule] = []
     flags = re.IGNORECASE
 
@@ -379,14 +399,21 @@ def _parse_deny_patterns(raw: Any, problems: list[str]) -> DenyPatternConfig | N
                     ids.add(tid)
                     rules.append(DenyRule("prohibited_terms", tid, re.compile(_term_regex(term), flags), action))
 
-    return DenyPatternConfig(tuple(rules), _canonical(raw))
+    return DenyPatternConfig(tuple(rules), _canonical(raw), max_scan_chars)
 
 
 def deny_pattern_matches(config: DenyPatternConfig | None, message: str) -> tuple[str | None, tuple[str, ...]]:
-    """(first BLOCK reason or None, all WARN reasons) for the user message."""
+    """(first BLOCK reason or None, all WARN reasons) for the user message.
+
+    Only the first config.max_scan_chars characters are scanned, which bounds
+    the regex work per call; a longer message adds config.truncation_note to
+    the warnings (whether or not a pattern matched)."""
     if config is None or not message:
         return None, ()
     warnings: list[str] = []
+    if len(message) > config.max_scan_chars:
+        message = message[: config.max_scan_chars]
+        warnings.append(config.truncation_note)
     for rule in config.rules:
         if rule.regex.search(message) is None:
             continue

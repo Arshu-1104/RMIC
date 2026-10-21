@@ -39,7 +39,11 @@ from rmic_guard._core.contract_loader import (
     _seal_dict,
     load_contract,
 )
-from rmic_guard._core.enforcement_engine import EnforcementEngine, EnforcementOutcome
+from rmic_guard._core.enforcement_engine import (
+    DEFAULT_MAX_PENDING_CONFIRMATIONS,
+    EnforcementEngine,
+    EnforcementOutcome,
+)
 from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError
 from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry
@@ -76,7 +80,9 @@ class GuardResult:
     ids_decision: str | None = None
     # NEEDS_CONFIRMATION: pass to guard.confirm() to execute the call (single use).
     confirmation_id: str | None = None
-    # Contract deny_patterns with action "warn" that matched; the call proceeded.
+    # Contract deny_patterns with action "warn" that matched (the call proceeded),
+    # and deny_pattern_scan_truncated:<N> when the message was longer than the
+    # contract's deny_patterns.max_scan_chars and only its start was scanned.
     warnings: tuple[str, ...] = ()
     outcome: EnforcementOutcome | None = field(default=None, repr=False, compare=False)
 
@@ -366,6 +372,13 @@ class Guard:
             ``<audit_log>.key``, created on first use).
         save_sealed: write a freshly sealed contract back to its file. Only
             meaningful when ``contract`` is a path; off by default.
+        confirmation_ttl_seconds: how long a NEEDS_CONFIRMATION id stays
+            valid for confirm(). Default: the contract's
+            ``confirmation_ttl_seconds``, else 600.
+        max_pending_confirmations: how many confirmations may wait at once
+            (default 100); issuing one more evicts the oldest. confirm() of an
+            expired or evicted id raises ConfirmationNotFoundError (``reason``
+            "expired" / "evicted") and is recorded in the audit log.
     """
 
     def __init__(
@@ -377,6 +390,8 @@ class Guard:
         audit_log: str | os.PathLike | None = None,
         audit_key: str | os.PathLike | None = None,
         save_sealed: bool = False,
+        confirmation_ttl_seconds: float | None = None,
+        max_pending_confirmations: int = DEFAULT_MAX_PENDING_CONFIRMATIONS,
     ) -> None:
         if isinstance(semantic, str) and semantic != "monitor" or not isinstance(semantic, (bool, str)):
             raise ValueError(f"semantic must be False, True or 'monitor', not {semantic!r}")
@@ -393,7 +408,13 @@ class Guard:
         if audit_log is None and audit_key is not None:
             raise ValueError("audit_key was given without audit_log")
         self.ledger = AuditLedger(audit_log, key_path=audit_key) if audit_log is not None else None
-        self.engine = EnforcementEngine(contract=self.contract, tools=self.tools, ledger=self.ledger)
+        self.engine = EnforcementEngine(
+            contract=self.contract,
+            tools=self.tools,
+            ledger=self.ledger,
+            confirmation_ttl_seconds=confirmation_ttl_seconds,
+            max_pending_confirmations=max_pending_confirmations,
+        )
 
         self._backends: dict[str, Any] = {}
         self._sessions: dict[str, _SessionState] = {}
@@ -473,7 +494,10 @@ class Guard:
         """Execute a call that returned NEEDS_CONFIRMATION (e.g. an amount above
         the contract's confirm_above). Executes exactly once: the id is consumed
         and a second confirm() -- or an unknown id -- raises
-        ConfirmationNotFoundError. The confirmation is written to the audit log."""
+        ConfirmationNotFoundError. So does an id older than
+        confirmation_ttl_seconds or evicted by max_pending_confirmations
+        (error.reason "expired" / "evicted"; the failure is audited). The
+        confirmation is written to the audit log."""
         pending_plan = self.engine.pending_plan(confirmation_id)
         execute = pending_plan is not None and self.tools.has(pending_plan.tool_name)
         outcome = self.engine.confirm(confirmation_id, execute_tool=execute)

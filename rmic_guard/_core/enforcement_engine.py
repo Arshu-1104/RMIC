@@ -6,19 +6,23 @@ Pass 1: hard rules (forbidden tools, argument rules, parameter bounds, data
 Pass 2: IDS composite; block only when IDS >= block threshold.
 Before a tool executes: contract confirm_above limits turn the call into
 NEEDS_CONFIRMATION; confirm(confirmation_id) executes it exactly once.
+Pending confirmations expire after a TTL and are capped in number (oldest
+evicted first).
 """
 
 from __future__ import annotations
 
 import secrets
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
 
 from rmic_guard._core.audit_ledger import AuditEntry, AuditLedger, hash_text
 from rmic_guard._core.contract_loader import RMICContract
-from rmic_guard._core.exceptions import ConfirmationNotFoundError
+from rmic_guard._core.exceptions import ConfirmationNotFoundError, EnforcementConfigError
 from rmic_guard._core.hard_rules import check_argument_rules, confirmation_reason, deny_pattern_matches
 from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
@@ -26,7 +30,18 @@ from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry, ToolResult
 from rmic_guard._utils.config import load_user_config
 
-__all__ = ["EnforcementEngine", "EnforcementMode", "EnforcementOutcome"]
+__all__ = [
+    "DEFAULT_CONFIRMATION_TTL_SECONDS",
+    "DEFAULT_MAX_PENDING_CONFIRMATIONS",
+    "EnforcementEngine",
+    "EnforcementMode",
+    "EnforcementOutcome",
+]
+
+DEFAULT_CONFIRMATION_TTL_SECONDS = 600.0
+DEFAULT_MAX_PENDING_CONFIRMATIONS = 100
+# Expired/evicted ids remembered so confirm() can say why it failed.
+_MIN_CONFIRMATION_TOMBSTONES = 1_000
 
 Decision = Literal[
     "PASS", "BLOCK", "WARN", "NEEDS_RECOVERY", "PREEMPTIVE_WARN", "NEEDS_CONFIRMATION", "CONFIRMED"
@@ -52,7 +67,8 @@ class EnforcementOutcome:
     # confirmation is needed ("confirm_above:<param>").
     confirmation_id: str | None = None
     confirmation_reason: str | None = None
-    # Contract deny_patterns with action "warn" that matched (the call proceeds).
+    # Contract deny_patterns with action "warn" that matched (the call proceeds),
+    # and deny_pattern_scan_truncated:<N> when only part of the message was scanned.
     warnings: tuple[str, ...] = ()
 
 
@@ -189,14 +205,37 @@ class EnforcementEngine:
         tools: ToolRegistry,
         ledger: AuditLedger | None = None,
         log_async: Callable[[AuditEntry], None] | None = None,
+        *,
+        confirmation_ttl_seconds: float | None = None,
+        max_pending_confirmations: int = DEFAULT_MAX_PENDING_CONFIRMATIONS,
     ) -> None:
         self.contract = contract
         self.tools = tools
         self.ledger = ledger
         self.log_async = log_async
         self._tool_approval_token = tools.issue_approval_token()
-        # confirmation_id -> plan awaiting confirm(); each id is removed on use.
-        self._pending_confirmations: dict[str, PlannedToolCall] = {}
+        # TTL precedence: explicit argument, then the contract, then the default.
+        ttl = confirmation_ttl_seconds
+        if ttl is None:
+            ttl = contract.confirmation_ttl_seconds
+        if ttl is None:
+            ttl = DEFAULT_CONFIRMATION_TTL_SECONDS
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 0 < ttl < float("inf"):
+            raise EnforcementConfigError(f"confirmation_ttl_seconds must be a positive number, not {ttl!r}")
+        max_pending = max_pending_confirmations
+        if isinstance(max_pending, bool) or not isinstance(max_pending, int) or max_pending < 1:
+            raise EnforcementConfigError(
+                f"max_pending_confirmations must be a positive integer, not {max_pending_confirmations!r}"
+            )
+        self.confirmation_ttl_seconds = float(ttl)
+        self.max_pending_confirmations = max_pending_confirmations
+        self._clock: Callable[[], float] = time.monotonic
+        # confirmation_id -> (plan, issued at) awaiting confirm(), oldest first;
+        # each id is removed on use, on expiry or when evicted.
+        self._pending_confirmations: OrderedDict[str, tuple[PlannedToolCall, float]] = OrderedDict()
+        # Expired / evicted ids -> (why, input hash), so confirm() can explain
+        # and audit the failure. Bounded: the oldest are forgotten.
+        self._dead_confirmations: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self._pending_lock = threading.Lock()
         # The contract's own thresholds are authoritative. A config file only
         # overrides them when one was named explicitly (path / RMIC_CONFIG) and
@@ -232,33 +271,103 @@ class EnforcementEngine:
             return None, None, warnings
         confirmation_id = secrets.token_urlsafe(16)
         with self._pending_lock:
-            self._pending_confirmations[confirmation_id] = plan
+            self._expire_locked()
+            while len(self._pending_confirmations) >= self.max_pending_confirmations:
+                old_id, (old_plan, _) = self._pending_confirmations.popitem(last=False)
+                self._bury_locked(old_id, "evicted", old_plan)
+            self._pending_confirmations[confirmation_id] = (plan, self._clock())
         return reason, confirmation_id, warnings
+
+    def _bury_locked(self, confirmation_id: str, why: str, plan: PlannedToolCall) -> None:
+        self._dead_confirmations[confirmation_id] = (why, hash_text(plan.raw_text))
+        limit = max(_MIN_CONFIRMATION_TOMBSTONES, self.max_pending_confirmations)
+        while len(self._dead_confirmations) > limit:
+            self._dead_confirmations.popitem(last=False)
+
+    def _expire_locked(self) -> None:
+        # Insertion order is issue order and the TTL is fixed, so expired
+        # entries are always a prefix.
+        cutoff = self._clock() - self.confirmation_ttl_seconds
+        while self._pending_confirmations:
+            cid, (plan, issued) = next(iter(self._pending_confirmations.items()))
+            if issued > cutoff:
+                break
+            del self._pending_confirmations[cid]
+            self._bury_locked(cid, "expired", plan)
 
     @property
     def pending_confirmations(self) -> int:
-        """Number of NEEDS_CONFIRMATION calls not yet confirmed."""
+        """Number of NEEDS_CONFIRMATION calls not yet confirmed, expired or evicted."""
         with self._pending_lock:
+            self._expire_locked()
             return len(self._pending_confirmations)
 
     def pending_plan(self, confirmation_id: str) -> PlannedToolCall | None:
-        """The call waiting under confirmation_id (None if unknown or already used)."""
+        """The call waiting under confirmation_id (None if unknown, used, expired or evicted)."""
         with self._pending_lock:
-            return self._pending_confirmations.get(confirmation_id)
+            self._expire_locked()
+            entry = self._pending_confirmations.get(confirmation_id)
+        return None if entry is None else entry[0]
+
+    def _confirmation_failed(self, confirmation_id: str, why: str, input_hash: str) -> ConfirmationNotFoundError:
+        """Audit a confirm() of an expired or evicted id; return the error to raise."""
+        c = self.contract
+        self._log(
+            AuditEntry(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent_id=c.agent_id,
+                input_hash=input_hash,
+                ids_score=0.0,
+                drift_type=None,
+                drift_velocity=None,
+                decision="BLOCK",
+                failure_reason=f"confirmation_{why}",
+                contract_hash=c.contract_hash,
+                recovery_attempted=False,
+                confirmation_id=confirmation_id,
+            ),
+            sync=True,
+        )
+        if why == "expired":
+            detail = (
+                f"it expired: confirmations are valid for {self.confirmation_ttl_seconds:g} s "
+                "(confirmation_ttl_seconds)"
+            )
+        else:
+            detail = (
+                f"it was evicted: at most {self.max_pending_confirmations} confirmations can be "
+                "pending (max_pending_confirmations) and it was the oldest"
+            )
+        return ConfirmationNotFoundError(
+            f"Confirmation {confirmation_id!r} failed, {detail}. The call was not executed; "
+            "submit it again to get a new confirmation id.",
+            reason=why,
+        )
 
     def confirm(self, confirmation_id: str, *, execute_tool: bool = True) -> EnforcementOutcome:
         """Execute a call that returned NEEDS_CONFIRMATION. Single use: the id
         is consumed before anything runs, so a second confirm() raises
         ConfirmationNotFoundError. Hard rules are re-checked; the confirmation
         is written to the audit log (decision CONFIRMED, same confirmation_id
-        as the NEEDS_CONFIRMATION entry)."""
+        as the NEEDS_CONFIRMATION entry).
+
+        An id older than confirmation_ttl_seconds, or evicted because more than
+        max_pending_confirmations were pending, raises ConfirmationNotFoundError
+        with reason "expired" / "evicted"; that failure is audited as a BLOCK
+        with failure_reason confirmation_expired / confirmation_evicted."""
         with self._pending_lock:
-            plan = self._pending_confirmations.pop(confirmation_id, None)
-        if plan is None:
+            self._expire_locked()
+            entry = self._pending_confirmations.pop(confirmation_id, None)
+            dead = self._dead_confirmations.pop(confirmation_id, None) if entry is None else None
+        if dead is not None:
+            raise self._confirmation_failed(confirmation_id, *dead)
+        if entry is None:
             raise ConfirmationNotFoundError(
                 f"No pending confirmation {confirmation_id!r}: it was never issued by this engine "
-                "or has already been used."
+                "or has already been used.",
+                reason="unknown",
             )
+        plan = entry[0]
         c = self.contract
         hard = _check_hard_rules(c, plan)  # contracts are immutable; defensive only
         decision: Decision = "BLOCK" if hard else "CONFIRMED"
@@ -326,6 +435,11 @@ class EnforcementEngine:
         else:
             hard = _check_hard_rules(c, plan)
         if hard:
+            # A deny-pattern block also reports warn matches before it and
+            # scan truncation; other hard rules fire before deny patterns run.
+            block_notes: tuple[str, ...] = ()
+            if hard.startswith("deny_pattern:"):
+                _, block_notes = deny_pattern_matches(c.deny_patterns, _deny_text(plan))
             # Compute IDS even on hard-rule block so the dashboard always has
             # real embedding scores for every Condition C row.
             ids_score_measured = 0.0
@@ -365,7 +479,7 @@ class EnforcementEngine:
                     drift_type=drift_type,
                     drift_velocity=None,
                     decision="BLOCK",
-                    failure_reason=hard,
+                    failure_reason=_join_reasons(hard, *block_notes),
                     false_positive=False,
                     false_negative=False,
                     contract_hash=c.contract_hash,
@@ -382,6 +496,7 @@ class EnforcementEngine:
                 recovery_system_message=None,
                 recovery_user_message=None,
                 tool_result=None,
+                warnings=block_notes,
             )
 
         gate_reason, confirmation_id, warnings = self._pre_execution_gate(plan, enforcement_mode)
@@ -518,6 +633,7 @@ class EnforcementEngine:
             # The IDS stops the call before execution, so nothing awaits confirmation.
             with self._pending_lock:
                 self._pending_confirmations.pop(confirmation_id, None)
+                self._dead_confirmations.pop(confirmation_id, None)
             gate_reason, confirmation_id = None, None
 
         if ids_score >= self.ids_block_threshold:

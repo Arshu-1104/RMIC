@@ -124,6 +124,8 @@ class RMICContract:
     # so contracts without them hash exactly as before.
     argument_rules: tuple[ArgumentRule, ...] = ()
     deny_patterns: DenyPatternConfig | None = None
+    # Seconds a NEEDS_CONFIRMATION id stays valid (None: the engine default).
+    confirmation_ttl_seconds: float | None = None
 
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
@@ -164,6 +166,8 @@ class RMICContract:
             d["argument_rules"] = {r.tool: json.loads(r.raw_json) for r in self.argument_rules}
         if self.deny_patterns is not None:
             d["deny_patterns"] = json.loads(self.deny_patterns.raw_json)
+        if self.confirmation_ttl_seconds is not None:
+            d["confirmation_ttl_seconds"] = self.confirmation_ttl_seconds
         if self.anchor_embedding:
             d["anchor_embedding"] = list(self.anchor_embedding)
         return d
@@ -248,6 +252,8 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
             data.get("argument_rules"), allowed_actions=_as_tuple_str(data.get("allowed_actions"))
         ),
         deny_patterns=parse_deny_patterns(data.get("deny_patterns")),
+        # Kept as written (int or float) so to_dict() hashes identically.
+        confirmation_ttl_seconds=data.get("confirmation_ttl_seconds"),
     )
 
 
@@ -380,6 +386,7 @@ def create_contract(
     contract_version: str = "1.0.0",
     argument_rules: Mapping[str, Mapping[str, Any]] | None = None,
     deny_patterns: Mapping[str, Any] | None = None,
+    confirmation_ttl_seconds: float | None = None,
     save_to: str | Path | None = None,
     model_name: str | None = None,
     require_embedding: bool = True,
@@ -443,6 +450,8 @@ def create_contract(
         data["argument_rules"] = json.loads(json.dumps(argument_rules))
     if deny_patterns is not None:
         data["deny_patterns"] = json.loads(json.dumps(deny_patterns))
+    if confirmation_ttl_seconds is not None:
+        data["confirmation_ttl_seconds"] = confirmation_ttl_seconds
 
     validate_contract_dict(data, source="RMICContract.create(...)")
 

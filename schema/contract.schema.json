@@ -95,6 +95,7 @@
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
+      "anyOf": [{ "required": ["packs"] }, { "required": ["custom"] }, { "required": ["prohibited_terms"] }],
       "description": "Opt-in heuristics matched against the end user's message only (case-insensitive search). HEURISTICS: they catch explicit wording and are evaded by rewording. BLOCK reasons are deny_pattern:<pack>:<pattern_id>; action 'warn' lets the call proceed and reports the match in GuardResult.warnings.",
       "properties": {
         "packs": {
@@ -130,8 +131,16 @@
             "terms": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
             "action": { "type": "string", "enum": ["block", "warn"], "default": "block" }
           }
+        },
+        "max_scan_chars": {
+          "type": "integer", "minimum": 1, "default": 10000,
+          "description": "Only the first max_scan_chars characters of the user message are scanned. A longer message is still scanned up to that point and the result carries the warning deny_pattern_scan_truncated:<max_scan_chars>."
         }
       }
+    },
+    "confirmation_ttl_seconds": {
+      "type": "number", "exclusiveMinimum": 0, "default": 600,
+      "description": "Seconds a NEEDS_CONFIRMATION id stays valid; guard.confirm() of an older id fails (reason 'expired') and is audited. Guard(confirmation_ttl_seconds=...) overrides it."
     },
     "ids_warn_threshold": {
       "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,

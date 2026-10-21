@@ -69,5 +69,14 @@ class EnforcementConfigError(RMICGuardError):
 
 
 class ConfirmationNotFoundError(RMICGuardError):
-    """Raised by confirm() for a confirmation id that was never issued, was
-    already used (ids are single-use) or belongs to another engine."""
+    """Raised by confirm() when the id cannot be confirmed. ``reason`` says why:
+
+    - "expired": older than the confirmation TTL;
+    - "evicted": dropped because too many confirmations were pending;
+    - "unknown": never issued, already used (ids are single-use), or issued by
+      another engine.
+    """
+
+    def __init__(self, message: str, *, reason: str = "unknown") -> None:
+        super().__init__(message)
+        self.reason = reason

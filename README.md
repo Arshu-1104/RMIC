@@ -120,7 +120,19 @@ guard.confirm(result.confirmation_id)          # raises ConfirmationNotFoundErro
 
 Values above `max` are still blocked outright. Both the `NEEDS_CONFIRMATION` and the `CONFIRMED`
 entries are written to the hash-chained audit log with the same `confirmation_id`. Pending
-confirmations live in memory in the `Guard` that issued them.
+confirmations live in memory in the `Guard` that issued them, and they are limited in two ways:
+
+- **Time to live:** 600 s by default. Set it in the contract (top-level
+  `"confirmation_ttl_seconds": 300`, covered by the hash) or with
+  `Guard(..., confirmation_ttl_seconds=300)`, which overrides the contract.
+- **Count:** at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`).
+  Issuing one more evicts the oldest.
+
+`guard.confirm()` of an expired or evicted id raises `ConfirmationNotFoundError` with
+`error.reason` `"expired"` or `"evicted"` (`"unknown"` for ids that were never issued or were
+already used). The tool does not run, and the failure is written to the audit log as a `BLOCK`
+with `failure_reason` `confirmation_expired` / `confirmation_evicted` and the same
+`confirmation_id`.
 
 **`deny_patterns`: opt-in phrase heuristics on the user's message.**
 
@@ -136,7 +148,10 @@ Matches block with reason `deny_pattern:<pack>:<pattern_id>` (`custom` and `proh
 pack names too); `"action": "warn"` lets the call run and lists the match in `result.warnings`.
 Patterns are matched against the end user's message only, never the model's output
 (`Guard.run()` passes the user's message separately). `prohibited_terms` match whole words,
-case-insensitively.
+case-insensitively. Only the first 10,000 characters of the message are scanned
+(`"max_scan_chars"` in `deny_patterns` changes this). A longer message is still scanned up
+to that point, and the result carries the warning `deny_pattern_scan_truncated:10000` (in
+`result.warnings` and the audit log), so text past the limit is never matched.
 
 > **These are heuristics, and rewording evades them.** The packs catch explicit wording such as
 > "from now on you're my accountant" or "your new goal is…". "Instead of support, …" or
@@ -150,6 +165,35 @@ case-insensitively.
 `contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
 is the research `financial_agent` contract plus `confirm_above: 10000` and account-format
 `patterns` (no `allowed_args`).
+
+### Sealing
+
+A sealed contract carries `contract_hash`, a SHA-256 over the canonical JSON of every other
+field: the rules, the thresholds, `created_at` and, when present, `anchor_embedding` (the
+averaged embedding of the `semantic_anchors`, used by semantic mode). Loading a sealed
+contract recomputes the hash and raises `ContractIntegrityError` if it differs. Loading never
+re-embeds, so a sealed file verifies the same way on every machine.
+
+**Because the hash covers `anchor_embedding`, sealing is not reproducible across machines.**
+The embedding comes from the local `fastembed` model. A different fastembed or onnxruntime
+version, or a different CPU, can change the vector in its last digits, and any change gives a
+different hash. Re-sealing the unchanged `financial_agent` contract on another setup changed
+its embedding by up to 5.7e-5 per dimension, and so changed its hash. Two people sealing the
+same unsealed file will usually get different hashes.
+
+- **Seal once and distribute the sealed file.** `rmic seal contract.json` (or
+  `Guard(path, save_sealed=True)`) writes `anchor_embedding` and `contract_hash` into the
+  file. Commit that file and load it everywhere.
+- **Don't re-seal an unchanged contract.** Re-sealing can change its hash and embedding, and
+  with them every IDS score. When you change a field, re-seal once and redistribute.
+- **In-memory auto-seal hashes are machine-specific.** `Guard("unsealed.json")` and
+  `Guard({...})` seal in memory. With `semantic=True` or `"monitor"` the resulting
+  `contract_hash` (in `GuardResult` and the audit log) depends on the machine and fastembed
+  version. If the contract has no `created_at`, sealing fills in the current time, so the hash
+  also changes on every load. Don't compare such hashes across machines or restarts. Seal the
+  file if audit logs need a stable hash.
+- With `semantic=False` an auto-sealed contract has no `anchor_embedding`, so its hash depends
+  only on the JSON (plus `created_at`, if sealing filled it in).
 
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and
@@ -452,7 +496,9 @@ writes it back into the contract file as `contract_hash` (`seal_contract_file(..
 since v0.3.0 `seal_contract_file()` alone seals in memory only). `load_contract(..., verify_hash=True)`
 (the default) checks this hash at load time; pass `verify_hash=False` to skip it during
 local experimentation. An unsealed file is sealed automatically on load (`auto_seal=True`,
-the default), in memory only unless you also pass `write_back=True`.
+the default), in memory only unless you also pass `write_back=True`. The hash covers
+`anchor_embedding`, which differs between machines and fastembed versions: see
+[Sealing](#sealing) before re-sealing a contract.
 
 On a WARN-level IDS score, `rmic_guard/_core/recovery_engine.py` generates a re-anchoring system
 message and user nudge derived from the contract's sealed `semantic_anchors`, giving the

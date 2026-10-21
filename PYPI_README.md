@@ -135,6 +135,7 @@ Optional contract fields, validated at load and covered by the contract hash:
   for argument values → `BLOCK argument_not_allowed:<tool>:<arg>` / `argument_pattern:<tool>:<arg>`.
 - `confirm_above` in `parameter_constraints`: larger values return `NEEDS_CONFIRMATION`
   (tool not run); `guard.confirm(result.confirmation_id)` runs it exactly once and logs it.
+  Ids expire after `confirmation_ttl_seconds` (default 600) and at most 100 can be pending.
 - `deny_patterns` (opt-in): phrase packs `role_reassignment`, `objective_override`,
   `guardrail_removal`, your own regexes and `prohibited_terms`, matched against the user's
   message → `BLOCK deny_pattern:<pack>:<id>` or a warning. **These are heuristics: rewordings
@@ -142,6 +143,10 @@ Optional contract fields, validated at load and covered by the contract hash:
 
 See the [README on GitHub](https://github.com/Arshu-1104/RMIC#contract-hard-rule-extensions-v04)
 for examples, and `load_example_contract("financial_agent_hardened")` for a contract using them.
+
+**Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
+fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the
+sealed file. Hashes of contracts auto-sealed in memory are machine-specific.
 
 ## Writing contracts in code
 

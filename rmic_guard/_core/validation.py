@@ -215,6 +215,10 @@ def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None
         )
     if data.get("deny_patterns") is not None:
         parse_deny_patterns(data["deny_patterns"], problems=problems)
+    if data.get("confirmation_ttl_seconds") is not None:
+        ttl = data["confirmation_ttl_seconds"]
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 0 < ttl < float("inf"):
+            problems.append(f"confirmation_ttl_seconds: must be a positive number of seconds, got {ttl!r}")
     _check_threshold(problems, data, "ids_warn_threshold")
     _check_threshold(problems, data, "ids_block_threshold")
     if (

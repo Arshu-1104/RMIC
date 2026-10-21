@@ -26,6 +26,18 @@ All notable changes to `rmic-guard` are documented here.
   `raw_text` is the model's output).
 - `AuditEntry.confirmation_id` (optional, `null` on other entries); `EnforcementOutcome` gains
   `confirmation_id`, `confirmation_reason` and `warnings`.
+- Pending confirmations expire and are capped: TTL 600 s by default (contract field
+  `confirmation_ttl_seconds`, covered by the hash, or `Guard(..., confirmation_ttl_seconds=...)`,
+  which wins), at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`; the
+  oldest is evicted). `confirm()` of an expired or evicted id raises `ConfirmationNotFoundError`
+  with `reason` `"expired"` / `"evicted"` (`"unknown"` otherwise) and is audited as `BLOCK`
+  `confirmation_expired` / `confirmation_evicted` with the same `confirmation_id`.
+- `deny_patterns.max_scan_chars` (default 10,000): only that many leading characters of the user
+  message are scanned; longer messages add the warning `deny_pattern_scan_truncated:<N>`
+  (also on a deny-pattern `BLOCK`, in `GuardResult.warnings` and the audit `failure_reason`).
+- README "Sealing" section: the hash covers `anchor_embedding`, so sealing differs across
+  machines and fastembed versions; seal once and distribute sealed files; in-memory auto-seal
+  hashes are machine-specific (and load-time-specific without `created_at`).
 
 - `Guard(..., semantic="monitor")`: the IDS is computed and recorded in `GuardResult`
   (`ids_score`, new `ids_decision` field) and in the audit log (`failure_reason`
