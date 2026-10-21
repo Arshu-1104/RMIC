@@ -1,10 +1,10 @@
-# prompts_v3: blind test set (instructions for writers)
+# prompts/v3: blind test set (instructions for writers)
 
 This folder will hold a test set written by people who have **not** seen RMIC-Guard's rules.
-Every number we have for the hard-rule extensions so far comes from `prompts_v2`, which was
+Every number we have for the hard-rule extensions so far comes from `prompts/v2`, which was
 written by the same person who wrote the rules. Those numbers are therefore optimistic: the
 held-out split has already been used to design the rules, and even the tune split shares the
-rule author's phrasing. `prompts_v3` exists to give one honest measurement. That only works if
+rule author's phrasing. `prompts/v3` exists to give one honest measurement. That only works if
 its writers stay blind and the set is evaluated exactly once.
 
 ## 1. Who can write it
@@ -26,7 +26,7 @@ its writers stay blind and the set is evaluated exactly once.
   (on the `v0.4-ids-scoring` branch)
 - everything under `experiment/hard_rule_gaps/`, `experiment/ids_v2/` and
   `experiment/ids_calibration_investigation/`
-- `prompts_v2/`
+- `prompts/v2/`
 - the README section "Contract hard-rule extensions", the PyPI README section of the same name,
   and the "Unreleased" part of `CHANGELOG.md`
 - the git history and pull requests of the `v0.4-hardening` and `v0.4-ids-scoring` branches
@@ -39,13 +39,13 @@ If you have already seen any of these, say so; you can still review labels, but 
   `legal_review_agent`, `support_agent`). They tell you each agent's role, its allowed and
   forbidden tools, its data scope and its parameter limits. That is what a real attacker or user
   would know about the agent.
-- `prompts/` (the original corpus) as an example of drift categories, but **do not copy or
+- `prompts/*.json` (the original v1 corpus; **not** `prompts/v2/`) as an example of drift categories, but **do not copy or
   paraphrase** its items.
 - The "Item format" section below.
 
 ## 4. What to write
 
-For **each** of the four contracts, one file `prompts_v3/<contract>.json` containing:
+For **each** of the four contracts, one file `prompts/v3/<contract>.json` containing:
 
 - **At least 40 attacks**, at least 8 in each drift category:
   - `role_drift`: the agent is asked to take on a different role;
@@ -71,7 +71,7 @@ the prompt and the date in the file's `description`.
 
 ## 5. Item format
 
-The same JSON shape as `prompts_v2` uses. Every field shown is required except `args` and `data`.
+The same JSON shape as `prompts/v2` uses. Every field shown is required except `args` and `data`.
 
 ```json
 {
@@ -97,19 +97,19 @@ The same JSON shape as `prompts_v2` uses. Every field shown is required except `
 - `data` lists the data categories the call touches, using the contract's `data_scope` names,
   only when the planned call would actually access them.
 - **Labels:** the reviewer reads every item and marks disagreements in a separate
-  `prompts_v3/review.json` (`{"<contract>/<id>": "comment"}`). Items the writer and reviewer
+  `prompts/v3/review.json` (`{"<contract>/<id>": "comment"}`). Items the writer and reviewer
   can't agree on are removed before freezing, and the count of removed items is reported.
 
 ## 6. Freezing and evaluating (once)
 
 1. When all four files and the review are done, **commit them in one commit** and record that
-   commit's hash in `prompts_v3/FROZEN` together with the date. From then on, the files in this
+   commit's hash in `prompts/v3/FROZEN` together with the date. From then on, the files in this
    folder must not change.
 2. Someone who is not the rule author then runs the evaluation **once**, at a recorded commit of
-   the code. The evaluation scripts are adapted to read `prompts_v3` only after the freeze, and
+   the code. The evaluation scripts are adapted to read `prompts/v3` only after the freeze, and
    that adaptation is committed separately before the run.
 3. The results are published as they come out, including bad ones. Changing a rule, a pattern,
-   a threshold or a contract after seeing them makes `prompts_v3` a tuning set: any later claim
-   then needs a new blind set (`prompts_v4`, same procedure).
-4. Nobody tunes on `prompts_v3`. Nobody looks at individual results before the full run is
+   a threshold or a contract after seeing them makes `prompts/v3` a tuning set: any later claim
+   then needs a new blind set (`prompts/v4`, same procedure).
+4. Nobody tunes on `prompts/v3`. Nobody looks at individual results before the full run is
    published.

@@ -3,7 +3,7 @@ argument_rules / confirm_above / deny_patterns extensions were added).
 
     python tests/fixtures/backcompat/make_snapshot.py
 
-Records, for every turn of every prompts_v2 item and each of the 4 contracts
+Records, for every turn of every prompts/v2 item and each of the 4 contracts
 as they were in v0.3, the decision and reason that Guard(contract) (hard rules
 only) returns when that turn is checked on its own. Also copies the v0.3
 financial_agent contract, which v0.4 re-seals with new fields, so the test can
@@ -33,7 +33,7 @@ def main() -> None:
     snapshot: dict[str, list[dict]] = {}
     for name in CONTRACTS:
         guard = Guard(load_contract(REPO_ROOT / "contracts" / f"{name}.json"))
-        raw = json.loads((REPO_ROOT / "prompts_v2" / f"{name}.json").read_text(encoding="utf-8"))
+        raw = json.loads((REPO_ROOT / "prompts" / "v2" / f"{name}.json").read_text(encoding="utf-8"))
         rows = []
         items = [{"id": "warmup", "turns": raw["warmup"]}] + raw["attacks"] + raw["legitimate"]
         for item in items:

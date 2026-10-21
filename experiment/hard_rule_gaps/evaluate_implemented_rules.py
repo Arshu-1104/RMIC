@@ -1,5 +1,5 @@
 """
-Evaluate the IMPLEMENTED hard-rule extensions (v0.4) on the prompts_v2 TUNE split.
+Evaluate the IMPLEMENTED hard-rule extensions (v0.4) on the prompts/v2 TUNE split.
 
     python experiment/hard_rule_gaps/evaluate_implemented_rules.py
 
@@ -11,7 +11,7 @@ that add the new contract fields. The research contract files are not changed.
 
 Only the TUNE split is used. The HELD-OUT split was used to design the rules
 (analyse_hard_rule_misses.py read its misses) and is not evaluated again; a
-fresh, blind test set is needed for an unbiased estimate (see prompts_v3/).
+fresh, blind test set is needed for an unbiased estimate (see prompts/v3/).
 The deny-pattern packs are exactly the R1-R3 regexes from the design-time
 analysis and the prohibited terms are R4's term lists written as literal
 terms; none of them was changed after looking at the tune split.
@@ -57,7 +57,7 @@ PROHIBITED_TERMS: dict[str, list[str]] = {
 }
 
 # allowed_args per tool, written from each tool's purpose in the design-time analysis
-# (only meaningful for fixed-schema tools; prompts_v2's hand-written plans are fixed-schema).
+# (only meaningful for fixed-schema tools; prompts/v2's hand-written plans are fixed-schema).
 ALLOWED_ARGS: dict[str, dict[str, list[str]]] = {
     "financial_agent": {
         "check_balance": ["account_id"],
@@ -149,8 +149,8 @@ def _v1_prompts() -> tuple[list[str], list[str], dict[str, list[str]]]:
 
 
 def tune_items(name: str) -> list[dict[str, Any]]:
-    split = set(json.loads((REPO_ROOT / "prompts_v2" / "split.json").read_text(encoding="utf-8"))["contracts"][name]["tune"])
-    raw = json.loads((REPO_ROOT / "prompts_v2" / f"{name}.json").read_text(encoding="utf-8"))
+    split = set(json.loads((REPO_ROOT / "prompts" / "v2" / "split.json").read_text(encoding="utf-8"))["contracts"][name]["tune"])
+    raw = json.loads((REPO_ROOT / "prompts" / "v2" / f"{name}.json").read_text(encoding="utf-8"))
     items = [dict(a, group="attack") for a in raw["attacks"] if a["id"] in split]
     items += [dict(x, group="legit", category="legitimate") for x in raw["legitimate"] if x["id"] in split]
     return items
@@ -202,7 +202,7 @@ def main() -> None:
     add("> **Held-out split: USED.** It was read to design the rules (see `hard_rule_misses.md`) and is not "
         "evaluated again. The numbers below are on the TUNE split only, which was not inspected while writing the "
         "rules and was not used to change them; they are still optimistic, because the same person wrote the attacks "
-        "and the patterns. An unbiased estimate needs the blind set described in `prompts_v3/README.md`.")
+        "and the patterns. An unbiased estimate needs the blind set described in `prompts/v3/README.md`.")
     add("")
     add(f"Tune split: {n_attacks} attacks and {n_legit} legitimate items (20 + 20 per contract). "
         f"The research contracts miss {len(baseline_missed)}/{n_attacks} tune attacks. \"Caught\" = any turn "
@@ -272,7 +272,7 @@ def main() -> None:
     add("")
     add("## Notes")
     add("")
-    add("- `allowed_args` catches attacks here only because `prompts_v2` plans use a fixed, hand-written argument "
+    add("- `allowed_args` catches attacks here only because `prompts/v2` plans use a fixed, hand-written argument "
         "schema. On 97 historical legitimate LLM plans with free-form JSON, an allowlist blocked 22–69 (23–71%), "
         "which is why `financial_agent_hardened` ships patterns only.")
     add("- The account patterns in `financial_agent_hardened` blocked 0/97 historical legitimate LLM plans.")

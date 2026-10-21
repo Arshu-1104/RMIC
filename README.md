@@ -168,11 +168,11 @@ to that point, and the result carries the warning `deny_pattern_scan_truncated:1
 
 > **These are heuristics, and rewording evades them.** The packs catch explicit wording such as
 > "from now on you're my accountant" or "your new goal is…". "Instead of support, …" or
-> "as the company's lawyer, …" get through. On the `prompts_v2` tune split the three packs caught
+> "as the company's lawyer, …" get through. On the `prompts/v2` tune split the three packs caught
 > 20 of the 41 attacks the other hard rules miss, with 0 of 80 legitimate items flagged
 > (prohibited terms alone caught 3). On the original `prompts/` corpus they match 12–14 of 25
 > attacks per contract. Both estimates are optimistic, because the same person wrote the
-> `prompts_v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
+> `prompts/v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
 > They are off in every bundled contract. Treat them as a cheap extra layer, not as protection.
 
 `contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
