@@ -28,6 +28,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import threading
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Union
@@ -36,6 +37,7 @@ from rmic_guard._core.audit_ledger import AuditLedger
 from rmic_guard._core.contract_loader import (
     RMICContract,
     _contract_from_dict,
+    _read_contract_json,
     _seal_dict,
     load_contract,
 )
@@ -43,8 +45,9 @@ from rmic_guard._core.enforcement_engine import (
     DEFAULT_MAX_PENDING_CONFIRMATIONS,
     EnforcementEngine,
     EnforcementOutcome,
+    PendingConfirmation,
 )
-from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError
+from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError, RMICGuardWarning
 from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry
 
@@ -146,9 +149,12 @@ def _resolve_contract(
         source = "Guard(<dict contract>)"
         data = dict(contract)
         if not data.get("contract_hash"):
+            _warn_unsealed(f"Contract {data.get('agent_id')!r} (a dict)", "rmic seal <file>")
             data = _seal_dict(data, source=source, require_embedding=semantic)
         resolved = _contract_from_dict(data, require_hash_match=True, source=source)
     elif isinstance(contract, (str, os.PathLike)):
+        if not save_sealed and not _read_contract_json(Path(contract)).get("contract_hash"):
+            _warn_unsealed(f"Contract file {os.fspath(contract)!r}", f"rmic seal {os.fspath(contract)}")
         resolved = load_contract(
             Path(contract),
             auto_seal=True,
@@ -167,6 +173,17 @@ def _resolve_contract(
             "Guard(..., semantic=False) for hard-rules-only enforcement."
         )
     return resolved
+
+
+def _warn_unsealed(what: str, seal_command: str) -> None:
+    warnings.warn(
+        f"{what} is not sealed, so it was sealed in memory for this process only: its "
+        "contract_hash is not stored anywhere, edits cannot be detected as tampering, and with "
+        "semantic=True the hash depends on this machine's embedding model. Seal it once with "
+        f"`{seal_command}` and distribute the sealed file.",
+        RMICGuardWarning,
+        stacklevel=4,
+    )
 
 
 def _make_reasoning_backend(llm: Any) -> Any:
@@ -373,8 +390,10 @@ class Guard:
         save_sealed: write a freshly sealed contract back to its file. Only
             meaningful when ``contract`` is a path; off by default.
         confirmation_ttl_seconds: how long a NEEDS_CONFIRMATION id stays
-            valid for confirm(). Default: the contract's
-            ``confirmation_ttl_seconds``, else 600.
+            valid for confirm(). If the contract sets
+            ``confirmation_ttl_seconds`` that is a ceiling: a shorter value
+            here applies, a longer one is ignored with an RMICGuardWarning.
+            Without a contract value, this (default 600) applies.
         max_pending_confirmations: how many confirmations may wait at once
             (default 100); issuing one more evicts the oldest. confirm() of an
             expired or evicted id raises ConfirmationNotFoundError (``reason``
@@ -515,6 +534,20 @@ class Guard:
             confirmation_id=confirmation_id,
             outcome=outcome,
         )
+
+    def pending_confirmations(self) -> tuple[PendingConfirmation, ...]:
+        """Calls awaiting confirm(), oldest first: confirmation_id, tool_name,
+        arguments, reason, created_at and expires_at (UTC datetimes). Expired
+        ones are not listed. Use it to show or cancel pending requests."""
+        return self.engine.list_pending_confirmations()
+
+    def cancel(self, confirmation_id: str) -> PendingConfirmation:
+        """Withdraw a pending confirmation without running the tool; returns
+        what was cancelled. The cancellation is written to the audit log
+        (BLOCK, failure_reason confirmation_cancelled, same confirmation_id)
+        and a later confirm() raises ConfirmationNotFoundError (reason
+        "cancelled"). An id that is not pending raises ConfirmationNotFoundError."""
+        return self.engine.cancel(confirmation_id)
 
     def _backend_for(self, llm: Any) -> Any:
         if not isinstance(llm, str):

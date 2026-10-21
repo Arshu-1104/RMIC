@@ -26,18 +26,26 @@ All notable changes to `rmic-guard` are documented here.
   `raw_text` is the model's output).
 - `AuditEntry.confirmation_id` (optional, `null` on other entries); `EnforcementOutcome` gains
   `confirmation_id`, `confirmation_reason` and `warnings`.
-- Pending confirmations expire and are capped: TTL 600 s by default (contract field
-  `confirmation_ttl_seconds`, covered by the hash, or `Guard(..., confirmation_ttl_seconds=...)`,
-  which wins), at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`; the
-  oldest is evicted). `confirm()` of an expired or evicted id raises `ConfirmationNotFoundError`
-  with `reason` `"expired"` / `"evicted"` (`"unknown"` otherwise) and is audited as `BLOCK`
+- Pending confirmations expire and are capped. TTL: the contract field
+  `confirmation_ttl_seconds` (covered by the hash) is a ceiling that
+  `Guard(..., confirmation_ttl_seconds=...)` can shorten but not lengthen (a longer value is
+  ignored with an `RMICGuardWarning`); without it the `Guard` argument or 600 s applies. At most
+  100 pending by default (`Guard(..., max_pending_confirmations=...)`; the oldest is evicted).
+  `confirm()` of an expired or evicted id raises `ConfirmationNotFoundError` with `reason`
+  `"expired"` / `"evicted"` (`"cancelled"`, `"unknown"` otherwise) and is audited as `BLOCK`
   `confirmation_expired` / `confirmation_evicted` with the same `confirmation_id`.
+- `Guard.pending_confirmations()` lists waiting calls (`PendingConfirmation`: id, tool,
+  arguments, reason, `created_at`, `expires_at`); `Guard.cancel(confirmation_id)` withdraws one
+  and audits it as `BLOCK` `confirmation_cancelled`. Engine equivalents:
+  `EnforcementEngine.list_pending_confirmations()` / `.cancel()`.
+- `RMICGuardWarning` (a `UserWarning`): `Guard` emits it when it seals a contract in memory
+  (pointing to `rmic seal`) and when a longer confirmation TTL is ignored.
 - `deny_patterns.max_scan_chars` (default 10,000): only that many leading characters of the user
   message are scanned; longer messages add the warning `deny_pattern_scan_truncated:<N>`
   (also on a deny-pattern `BLOCK`, in `GuardResult.warnings` and the audit `failure_reason`).
 - README "Sealing" section: the hash covers `anchor_embedding`, so sealing differs across
   machines and fastembed versions; seal once and distribute sealed files; in-memory auto-seal
-  hashes are machine-specific (and load-time-specific without `created_at`).
+  hashes are machine-specific.
 
 - `Guard(..., semantic="monitor")`: the IDS is computed and recorded in `GuardResult`
   (`ids_score`, new `ids_decision` field) and in the audit log (`failure_reason`
@@ -47,6 +55,11 @@ All notable changes to `rmic-guard` are documented here.
 
 ### Changed
 
+- **In-memory sealing no longer stamps `created_at`** (`load_contract` auto-seal and
+  `seal_contract_file` without `write_back`, `Guard` with a path or dict). Loading the same
+  unsealed contract twice now gives the same hash (previously the current time made every load
+  different). Sealing that writes the file (`rmic seal`, `write_back=True`, `save_sealed=True`)
+  still stamps it; already-sealed files are unaffected.
 - **Contract hashes: no existing contract changed.** `contracts/*.json` and the bundled copies of
   `financial_agent`, `healthcare_research_agent`, `legal_review_agent` and `support_agent` are
   byte-identical to v0.3 (the research and IBM-pilot contracts must stay reproducible). The only

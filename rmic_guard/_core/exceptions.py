@@ -16,11 +16,16 @@ __all__ = [
     "ToolExecutionNotApprovedError",
     "EnforcementConfigError",
     "ConfirmationNotFoundError",
+    "RMICGuardWarning",
 ]
 
 
 class RMICGuardError(Exception):
     """Base class for every error raised by rmic-guard."""
+
+
+class RMICGuardWarning(UserWarning):
+    """Warnings issued by rmic-guard (e.g. an unsealed contract, an ignored setting)."""
 
 
 class InvalidContractError(RMICGuardError):
@@ -73,6 +78,7 @@ class ConfirmationNotFoundError(RMICGuardError):
 
     - "expired": older than the confirmation TTL;
     - "evicted": dropped because too many confirmations were pending;
+    - "cancelled": withdrawn with cancel();
     - "unknown": never issued, already used (ids are single-use), or issued by
       another engine.
     """

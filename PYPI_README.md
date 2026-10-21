@@ -135,7 +135,9 @@ Optional contract fields, validated at load and covered by the contract hash:
   for argument values → `BLOCK argument_not_allowed:<tool>:<arg>` / `argument_pattern:<tool>:<arg>`.
 - `confirm_above` in `parameter_constraints`: larger values return `NEEDS_CONFIRMATION`
   (tool not run); `guard.confirm(result.confirmation_id)` runs it exactly once and logs it.
-  Ids expire after `confirmation_ttl_seconds` (default 600) and at most 100 can be pending.
+  Ids expire after `confirmation_ttl_seconds` (default 600; a contract value is a ceiling the
+  `Guard` can only shorten) and at most 100 can be pending; `guard.pending_confirmations()`
+  lists them and `guard.cancel(id)` withdraws one (audited).
 - `deny_patterns` (opt-in): phrase packs `role_reassignment`, `objective_override`,
   `guardrail_removal`, your own regexes and `prohibited_terms`, matched against the user's
   message → `BLOCK deny_pattern:<pack>:<id>` or a warning. **These are heuristics: rewordings
@@ -146,7 +148,8 @@ for examples, and `load_example_contract("financial_agent_hardened")` for a cont
 
 **Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
 fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the
-sealed file. Hashes of contracts auto-sealed in memory are machine-specific.
+sealed file. `Guard` warns when it seals an unsealed contract in memory; such hashes are
+stable across loads but machine-specific in semantic mode.
 
 ## Writing contracts in code
 

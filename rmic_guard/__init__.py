@@ -72,6 +72,7 @@ from rmic_guard._core.enforcement_engine import (
     EnforcementEngine,
     EnforcementMode,
     EnforcementOutcome,
+    PendingConfirmation,
 )
 from rmic_guard._core.exceptions import (
     ContractIntegrityError,
@@ -80,6 +81,7 @@ from rmic_guard._core.exceptions import (
     EnforcementConfigError,
     InvalidContractError,
     RMICGuardError,
+    RMICGuardWarning,
     ToolExecutionNotApprovedError,
     ToolNotRegisteredError,
 )
@@ -141,10 +143,12 @@ __all__ = [
     "ToolExecutionNotApprovedError",
     "EnforcementConfigError",
     "ConfirmationNotFoundError",
+    "RMICGuardWarning",
     # enforcement
     "EnforcementEngine",
     "EnforcementMode",
     "EnforcementOutcome",
+    "PendingConfirmation",
     # drift detection
     "IDSEngine",
     "set_embedding_backend",

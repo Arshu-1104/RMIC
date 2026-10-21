@@ -18,6 +18,7 @@ from rmic_guard import (
     InvalidContractError,
     PlannedToolCall,
     RMICContract,
+    RMICGuardWarning,
     ToolRegistry,
     list_example_contracts,
     load_contract,
@@ -256,10 +257,19 @@ class TestConfirmationLimits:
         assert guard.engine.confirmation_ttl_seconds == 600
         assert guard.engine.max_pending_confirmations == 100
 
-    def test_ttl_from_contract_and_guard_override(self) -> None:
+    def test_contract_ttl_is_a_ceiling(self, recwarn: pytest.WarningsRecorder) -> None:
         assert Guard(_contract(confirmation_ttl_seconds=30)).engine.confirmation_ttl_seconds == 30
         guard = Guard(_contract(confirmation_ttl_seconds=30), confirmation_ttl_seconds=5)
-        assert guard.engine.confirmation_ttl_seconds == 5
+        assert guard.engine.confirmation_ttl_seconds == 5  # shortening is allowed
+        assert not [w for w in recwarn if "confirmation_ttl_seconds" in str(w.message)]
+
+    def test_longer_guard_ttl_is_ignored_with_a_warning(self) -> None:
+        with pytest.warns(RMICGuardWarning, match="confirmation_ttl_seconds=900 is ignored"):
+            guard = Guard(_contract(confirmation_ttl_seconds=30), confirmation_ttl_seconds=900)
+        assert guard.engine.confirmation_ttl_seconds == 30
+
+    def test_guard_ttl_applies_when_the_contract_sets_none(self) -> None:
+        assert Guard(_contract(), confirmation_ttl_seconds=900).engine.confirmation_ttl_seconds == 900
 
     def test_valid_until_the_ttl(self, tmp_path: Path) -> None:
         guard, calls, clock = self._guard(tmp_path, confirmation_ttl_seconds=60)
@@ -318,6 +328,57 @@ class TestConfirmationLimits:
             guard.confirm(old)
         assert err.value.reason == "expired"
         assert guard.confirm(a).executed and guard.confirm(b).executed
+
+    def test_pending_confirmations_lists_id_tool_and_times(self, tmp_path: Path) -> None:
+        guard, _, _ = self._guard(tmp_path, confirmation_ttl_seconds=120)
+        assert guard.pending_confirmations() == ()
+        first, second = self._ask(guard, "1111"), self._ask(guard, "2222")
+        pending = guard.pending_confirmations()
+        assert [p.confirmation_id for p in pending] == [first, second]  # oldest first
+        p = pending[0]
+        assert p.tool_name == "transfer_funds" and p.arguments == {"amount": 20000, "to_account": "1111"}
+        assert p.reason == "confirm_above:amount"
+        assert p.created_at.tzinfo is not None and (p.expires_at - p.created_at).total_seconds() == 120
+        guard.confirm(first)
+        assert [p.confirmation_id for p in guard.pending_confirmations()] == [second]
+
+    def test_pending_confirmations_omits_expired(self, tmp_path: Path) -> None:
+        guard, _, clock = self._guard(tmp_path, confirmation_ttl_seconds=10)
+        self._ask(guard)
+        clock.now += 10
+        assert guard.pending_confirmations() == ()
+
+    def test_cancel_is_audited_and_blocks_a_later_confirm(self, tmp_path: Path) -> None:
+        guard, calls, _ = self._guard(tmp_path)
+        cid, other = self._ask(guard, "1111"), self._ask(guard, "2222")
+        cancelled = guard.cancel(cid)
+        assert cancelled.confirmation_id == cid and cancelled.arguments["to_account"] == "1111"
+        assert [p.confirmation_id for p in guard.pending_confirmations()] == [other]
+        with pytest.raises(ConfirmationNotFoundError, match="cancelled") as err:
+            guard.confirm(cid)
+        assert err.value.reason == "cancelled" and calls == []
+        with pytest.raises(ConfirmationNotFoundError):
+            guard.cancel(cid)
+        entries = _audit_entries(tmp_path / "audit.jsonl")
+        assert [(e["decision"], e["failure_reason"]) for e in entries] == [
+            ("NEEDS_CONFIRMATION", "confirm_above:amount"),
+            ("NEEDS_CONFIRMATION", "confirm_above:amount"),
+            ("BLOCK", "confirmation_cancelled"),  # logged once, not again by the confirm() attempt
+        ]
+        assert entries[2]["confirmation_id"] == cid and entries[2]["input_hash"] == entries[0]["input_hash"]
+        assert guard.verify_log() is True
+        assert guard.confirm(other).executed and len(calls) == 1
+
+    def test_cancel_unknown_or_expired_id(self, tmp_path: Path) -> None:
+        guard, _, clock = self._guard(tmp_path, confirmation_ttl_seconds=10)
+        with pytest.raises(ConfirmationNotFoundError) as err:
+            guard.cancel("nope")
+        assert err.value.reason == "unknown"
+        cid = self._ask(guard)
+        clock.now += 10
+        with pytest.raises(ConfirmationNotFoundError) as err:
+            guard.cancel(cid)
+        assert err.value.reason == "expired"
 
     @pytest.mark.parametrize("ttl", [0, -5, True, "600", float("inf")])
     def test_invalid_ttl_is_rejected(self, ttl: Any) -> None:

@@ -30,6 +30,12 @@ def _char_ngram_embed(texts: list[str]) -> np.ndarray:
     return out
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Most tests pass unsealed contract dicts on purpose; the "not sealed"
+    # warning is asserted explicitly where it matters (pytest.warns still sees it).
+    config.addinivalue_line("filterwarnings", "ignore::rmic_guard.RMICGuardWarning")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _deterministic_embeddings() -> None:
     set_embedding_backend(_char_ngram_embed)

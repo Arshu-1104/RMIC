@@ -122,17 +122,30 @@ Values above `max` are still blocked outright. Both the `NEEDS_CONFIRMATION` and
 entries are written to the hash-chained audit log with the same `confirmation_id`. Pending
 confirmations live in memory in the `Guard` that issued them, and they are limited in two ways:
 
-- **Time to live:** 600 s by default. Set it in the contract (top-level
-  `"confirmation_ttl_seconds": 300`, covered by the hash) or with
-  `Guard(..., confirmation_ttl_seconds=300)`, which overrides the contract.
-- **Count:** at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`).
-  Issuing one more evicts the oldest.
+- **Time to live:** a top-level contract field `"confirmation_ttl_seconds": 300` (covered by
+  the hash) is a ceiling. `Guard(..., confirmation_ttl_seconds=60)` can shorten it, but a longer
+  value is ignored with an `RMICGuardWarning`. If the contract doesn't set it, the `Guard`
+  argument applies, or 600 s by default.
+- **Count:** at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`, a
+  `Guard` setting only). Issuing one more evicts the oldest.
 
-`guard.confirm()` of an expired or evicted id raises `ConfirmationNotFoundError` with
-`error.reason` `"expired"` or `"evicted"` (`"unknown"` for ids that were never issued or were
-already used). The tool does not run, and the failure is written to the audit log as a `BLOCK`
-with `failure_reason` `confirmation_expired` / `confirmation_evicted` and the same
-`confirmation_id`.
+Apps can show and withdraw pending requests:
+
+```python
+for p in guard.pending_confirmations():   # oldest first; expired ones are not listed
+    print(p.confirmation_id, p.tool_name, p.arguments, p.reason, p.created_at, p.expires_at)
+guard.cancel(p.confirmation_id)            # the tool never runs; returns what was cancelled
+```
+
+`created_at` and `expires_at` are UTC datetimes. A cancellation is written to the audit log as
+a `BLOCK` with `failure_reason` `confirmation_cancelled` and the same `confirmation_id`.
+
+`guard.confirm()` of an id that is no longer pending raises `ConfirmationNotFoundError`, and
+`error.reason` says why: `"expired"`, `"evicted"`, `"cancelled"`, or `"unknown"` (never issued
+or already used). The tool does not run. An expired or evicted id's failed `confirm()` is
+written to the audit log as a `BLOCK` with `failure_reason` `confirmation_expired` /
+`confirmation_evicted` and the same `confirmation_id`. A cancelled id isn't logged again,
+because its cancellation already was.
 
 **`deny_patterns`: opt-in phrase heuristics on the user's message.**
 
@@ -187,13 +200,15 @@ same unsealed file will usually get different hashes.
 - **Don't re-seal an unchanged contract.** Re-sealing can change its hash and embedding, and
   with them every IDS score. When you change a field, re-seal once and redistribute.
 - **In-memory auto-seal hashes are machine-specific.** `Guard("unsealed.json")` and
-  `Guard({...})` seal in memory. With `semantic=True` or `"monitor"` the resulting
-  `contract_hash` (in `GuardResult` and the audit log) depends on the machine and fastembed
-  version. If the contract has no `created_at`, sealing fills in the current time, so the hash
-  also changes on every load. Don't compare such hashes across machines or restarts. Seal the
-  file if audit logs need a stable hash.
+  `Guard({...})` seal in memory and emit an `RMICGuardWarning` pointing to `rmic seal`. The
+  in-memory seal doesn't add `created_at` (only sealing that writes the file does). So loading
+  the same unsealed contract again, in the same or another process, gives the same hash as long
+  as the embedding is the same. With `semantic=True` or `"monitor"` the embedding, and with it
+  the hash in `GuardResult` and the audit log, depends on the machine and fastembed version.
+  Don't compare such hashes across machines. Seal the file if audit logs need one stable hash.
 - With `semantic=False` an auto-sealed contract has no `anchor_embedding`, so its hash depends
-  only on the JSON (plus `created_at`, if sealing filled it in).
+  only on the JSON.
+- Already-sealed contracts are unaffected: their `created_at` and hash are stored in the file.
 
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and

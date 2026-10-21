@@ -279,11 +279,14 @@ def _seal_dict(
     source: str | None,
     model_name: str | None = None,
     require_embedding: bool = True,
+    stamp_created_at: bool = False,
 ) -> dict[str, Any]:
     """Return a sealed copy of a raw contract dict (never mutates ``data``).
 
     Validates the pre-seal shape, computes anchor_embedding (when
-    require_embedding) and contract_hash, and fills created_at if missing.
+    require_embedding) and contract_hash. created_at is filled in (when
+    missing) only with stamp_created_at, i.e. when the sealed contract is
+    written to disk: an in-memory seal must hash the same way on every load.
     """
     sealed = {k: v for k, v in dict(data).items() if k not in ("anchor_embedding", "contract_hash")}
     validate_contract_dict(sealed, source=source)
@@ -295,7 +298,7 @@ def _seal_dict(
         centroid = anchor_centroid_from_anchors(list(anchors), model_name=model_name)
         sealed["anchor_embedding"] = [float(x) for x in centroid.tolist()]
 
-    if sealed.get("created_at") in (None, ""):
+    if stamp_created_at and sealed.get("created_at") in (None, ""):
         sealed["created_at"] = datetime.now(timezone.utc).isoformat()
 
     sealed["contract_hash"] = compute_contract_hash(sealed)
@@ -323,7 +326,13 @@ def load_contract(
     p = Path(path)
     raw = _read_contract_json(p)
     if auto_seal and not raw.get("contract_hash"):
-        sealed = _seal_dict(raw, source=str(p), model_name=model_name, require_embedding=require_embedding)
+        sealed = _seal_dict(
+            raw,
+            source=str(p),
+            model_name=model_name,
+            require_embedding=require_embedding,
+            stamp_created_at=write_back,
+        )
         if write_back:
             _write_contract_json(p, sealed)
         return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
@@ -346,7 +355,7 @@ def seal_contract_file(
     untouched. Pass write_back=True (or run `rmic seal <file>`) to persist it.
     """
     p = Path(path)
-    sealed = _seal_dict(_read_contract_json(p), source=str(p), model_name=model_name)
+    sealed = _seal_dict(_read_contract_json(p), source=str(p), model_name=model_name, stamp_created_at=write_back)
     if write_back:
         _write_contract_json(p, sealed)
     return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
