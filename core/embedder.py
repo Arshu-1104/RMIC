@@ -52,10 +52,19 @@ def get_embedding_backend() -> Any | None:
 @lru_cache(maxsize=4)
 def get_model(model_name: str | None = None) -> Any:
     """Return a fastembed TextEmbedding model, or SentenceTransformer if fastembed is unavailable."""
+    resolved_name = model_name or DEFAULT_MODEL_NAME
+    # First call per model_name downloads it once, then fastembed/HF caches
+    # it locally -- this print makes that first-run pause visible instead of
+    # a silent multi-second/minute hang with no feedback.
+    print(
+        f"[rmic-guard] Loading embedding model '{resolved_name}' "
+        f"(first run downloads it once, then it's cached locally)...",
+        flush=True,
+    )
     try:
         from fastembed import TextEmbedding
 
-        return TextEmbedding(model_name or DEFAULT_MODEL_NAME)
+        return TextEmbedding(resolved_name)
     except (ImportError, OSError):
         from sentence_transformers import SentenceTransformer as ST
 

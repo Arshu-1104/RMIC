@@ -38,7 +38,7 @@ classifiers = [
 # and never trigger fastembed's model download.
 dependencies = [
     "numpy>=1.26.0,<2.3.0",
-    "scipy>=1.13.0",
+    "scipy>=1.13.0,<1.16.0",
     "cryptography>=42.0.0",
     "PyYAML>=6.0.0",
     "fastembed>=0.4.0,<0.9.0",
@@ -90,7 +90,7 @@ packages = ["rmic_guard", "core", "utils"]
 # tests/test_validation.py doesn't currently check the two are identical;
 # a `diff schema/contract.schema.json rmic_guard/schema/contract.schema.json`
 # pre-release check is the mitigation until that's automated.
-rmic_guard = ["py.typed", "schema/contract.schema.json"]
+rmic_guard = ["py.typed", "schema/contract.schema.json", "examples/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

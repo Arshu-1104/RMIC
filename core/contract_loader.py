@@ -30,7 +30,9 @@ __all__ = [
     "RMICContract",
     "canonical_contract_dict_for_hash",
     "compute_contract_hash",
+    "list_example_contracts",
     "load_contract",
+    "load_example_contract",
     "seal_contract_file",
     "verify_contract",
 ]
@@ -399,3 +401,44 @@ def create_contract(
 
 # Attach the beginner API onto the frozen dataclass so `RMICContract.create(...)` works.
 RMICContract.create = staticmethod(create_contract)
+
+
+# Bundled, pre-sealed example contracts (loadable with zero setup, zero
+# network call -- they ship already sealed with contract_hash/anchor_embedding
+# baked in). Shipped as package data under rmic_guard/examples/ (see
+# pyproject.toml [tool.setuptools.package-data]) so this works identically
+# in a repo checkout and a `pip install rmic-guard` install.
+_EXAMPLE_CONTRACTS = (
+    "financial_agent",
+    "healthcare_research_agent",
+    "legal_review_agent",
+    "support_agent",
+)
+
+
+def list_example_contracts() -> tuple[str, ...]:
+    """Names usable with load_example_contract(name)."""
+    return _EXAMPLE_CONTRACTS
+
+
+def load_example_contract(name: str) -> RMICContract:
+    """Load one of the bundled, pre-sealed example contracts by name.
+
+    >>> from rmic_guard import load_example_contract
+    >>> contract = load_example_contract("financial_agent")
+
+    No network call: these contracts are already sealed, so this works
+    fully offline immediately after `pip install rmic-guard`, with no LLM
+    key and no contract-writing required. See list_example_contracts().
+    """
+    if name not in _EXAMPLE_CONTRACTS:
+        available = ", ".join(_EXAMPLE_CONTRACTS)
+        raise ValueError(f"Unknown example contract {name!r}. Available: {available}")
+
+    import importlib.resources as resources
+
+    ref = resources.files("rmic_guard.examples").joinpath(f"{name}.json")
+    with resources.as_file(ref) as path:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+
+    return _contract_from_dict(data, require_hash_match=True, source=f"load_example_contract({name!r})")

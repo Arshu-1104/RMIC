@@ -54,7 +54,9 @@ from core.contract_loader import (
     canonical_contract_dict_for_hash,
     compute_contract_hash,
     create_contract,
+    list_example_contracts,
     load_contract,
+    load_example_contract,
     seal_contract_file,
     verify_contract,
 )
@@ -109,6 +111,8 @@ __all__ = [
     "DataScope",
     "ParameterConstraint",
     "load_contract",
+    "load_example_contract",
+    "list_example_contracts",
     "seal_contract_file",
     "verify_contract",
     "compute_contract_hash",
