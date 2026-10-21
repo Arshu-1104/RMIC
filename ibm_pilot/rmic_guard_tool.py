@@ -148,7 +148,7 @@ def _outcome_to_ibm_response(
 ) -> IBMToolResponse:
     """Adapt an EnforcementOutcome into the structured IBM response.
 
-    Decision collapsing follows the same rule demo.py's _outcome_label()
+    Decision collapsing follows the same rule scripts/demo.py's _outcome_label()
     uses: PASS and PREEMPTIVE_WARN are treated as an allowed execution;
     everything else (BLOCK, WARN, NEEDS_RECOVERY) is treated as not allowed,
     since EnforcementEngine only executes the tool for PASS/PREEMPTIVE_WARN.
@@ -227,7 +227,7 @@ class RMICGuardTool:
     existing sealed contract with rmic_guard._core.contract_loader.load_contract, opens
     the existing rmic_guard._core.audit_ledger.AuditLedger at the configured path, and
     builds one rmic_guard._core.enforcement_engine.EnforcementEngine — the same three
-    calls demo.py and examples/quickstart.py already make. handle_request()
+    calls scripts/demo.py and examples/quickstart.py already make. handle_request()
     only adapts shapes; evaluate_and_maybe_execute() does the actual work.
     """
 
@@ -264,7 +264,7 @@ class RMICGuardTool:
         self.enforcement_mode: EnforcementMode = enforcement_mode
 
         # Per-tool-instance trajectory state, mirroring the recent_ids /
-        # tool_call_history lists demo.py keeps across a query loop. In a
+        # tool_call_history lists scripts/demo.py keeps across a query loop. In a
         # real Orchestrate deployment this should be keyed per conversation
         # session rather than per-process; see README "Limitations".
         self._recent_ids: list[float] = []
@@ -288,7 +288,7 @@ class RMICGuardTool:
 
         Adapts `request` into the existing PlannedToolCall, calls the
         existing EnforcementEngine.evaluate_and_maybe_execute exactly as
-        demo.py does, updates this instance's trajectory state, and adapts
+        scripts/demo.py does, updates this instance's trajectory state, and adapts
         the resulting EnforcementOutcome into a structured IBMToolResponse.
 
         Args:

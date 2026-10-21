@@ -290,9 +290,7 @@ of this repo.
 | `ibm_pilot/` | IBM watsonx Orchestrate integration — see below. |
 | `examples/` | `quickstart.py` (offline `Guard` PASS/BLOCK), `basic_enforcement.py` (parameter/data-scope rules), `contract_creation.py` (beginner vs. advanced contract API), `identity_drift.py` (semantic IDS scoring). |
 | `tests/` | `pytest` suite covering the `Guard` API, contract creation/validation/integrity, enforcement decisions, audit-log verification, tool registry, and IDS scoring — `pytest tests/`. |
-| `demo.py` | Root-level killer demo for Condition C (middleware-only enforcement). |
-| `preflight_check.py` | No-API-call environment validation. |
-| `seal_contracts.py` | Computes and writes the SHA-256 `contract_hash` (and embedding anchor, where possible) for each file in `contracts/`. |
+| `scripts/` | `demo.py` (killer demo for Condition C, middleware-only enforcement), `preflight_check.py` (no-API-call environment validation), `seal_contracts.py` (re-seals contracts; refuses the frozen research contracts unless `--force`). |
 | `paper_assets/` | Figures (ROC curves) supporting the write-up referenced below. |
 
 ---
@@ -316,7 +314,7 @@ pip install -r requirements.txt
 
 (On macOS/Linux, activate with `source .venv/bin/activate` instead.)
 
-The research scripts (`experiment/`, `baselines/`, `demo.py`, `preflight_check.py`,
+The research scripts (`experiment/`, `baselines/`, `scripts/`,
 `ibm_pilot/`) point the SDK at this repo's `config.yaml` by setting `RMIC_CONFIG`
 themselves; set it explicitly to use a different config file.
 
@@ -333,7 +331,7 @@ GROQ_API_KEY=your_key_here
 ## Validate
 
 ```powershell
-python preflight_check.py
+python scripts/preflight_check.py
 ```
 
 Runs 7 no-network checks (Python version, `.env`/provider keys, core modules import,
@@ -505,9 +503,10 @@ reordered lines as well as edits (tail truncation needs an externally recorded
 restarts (`audit_key=` / `RMIC_AUDIT_KEY` / `<log>.key`), and the public key is written to
 `<log>.pub` so `AuditLedger.verify_file(<log>)` can check the log later.
 
-Contracts are sealed before use: `seal_contracts.py` computes a SHA-256 hash over each
+Contracts are sealed before use: `scripts/seal_contracts.py` computes a SHA-256 hash over each
 contract's fields (and an embedding anchor, when an embedding backend is available) and
-writes it back into the contract file as `contract_hash` (`seal_contract_file(..., write_back=True)`;
+writes it back into the contract file as `contract_hash` (it refuses to rewrite the four frozen
+research contracts unless `--force` is passed; `seal_contract_file(..., write_back=True)`;
 since v0.3.0 `seal_contract_file()` alone seals in memory only). `load_contract(..., verify_hash=True)`
 (the default) checks this hash at load time; pass `verify_hash=False` to skip it during
 local experimentation. An unsealed file is sealed automatically on load (`auto_seal=True`,

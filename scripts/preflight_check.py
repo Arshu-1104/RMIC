@@ -2,7 +2,7 @@
 RMIC-Guard pre-flight validation (no API calls, no Anthropic credits).
 
 Run from the repository root:
-  python preflight_check.py
+  python scripts/preflight_check.py
 """
 
 from __future__ import annotations
@@ -15,11 +15,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 # The SDK only reads a config file named explicitly (v0.3+); research
 # scripts opt in to the repo's config.yaml here, before touching the SDK.
-os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[0] / "config.yaml"))
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[1] / "config.yaml"))
+# Run as `python scripts/<name>.py`: make the repository's rmic_guard importable.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rmic_guard._utils.config import load_config
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]  # repository root
 
 CORE_FILES = (
     "contract_loader.py",
@@ -210,7 +212,7 @@ def main() -> None:
     print()
 
     if failed == 0:
-        print("System ready. Run python demo.py to start.")
+        print("System ready. Run python scripts/demo.py to start.")
         sys.exit(0)
     print("Fix the errors above before running the experiment.")
     sys.exit(1)

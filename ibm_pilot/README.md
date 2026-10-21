@@ -65,9 +65,11 @@ RMIC/
 ├── dashboard/
 ├── experiment/
 │
+├── scripts/
+│ └── seal_contracts.py
+│
 ├── config.yaml
 ├── pyproject.toml
-├── seal_contracts.py
 └── requirements.txt
 ```
 
@@ -137,11 +139,10 @@ The pilot requires an API key configured for the model provider used by the reas
 
 ## 7. Running the Demo
 
-Seal the identity contracts before running the demo:
-
-```
-python seal_contracts.py
-```
+The identity contracts in `contracts/` ship sealed, so there is nothing to seal
+before running the demo. (`python scripts/seal_contracts.py` re-seals them, but it
+refuses the frozen research contracts unless `--force` is passed: re-sealing changes
+their hashes.)
 
 Run the pilot demo:
 

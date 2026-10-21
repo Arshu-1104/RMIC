@@ -2,7 +2,7 @@
 RMIC-Guard killer demo: Condition C (middleware only — contract not in the LLM system prompt).
 
 Run from the repository root:
-  python demo.py
+  python scripts/demo.py
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ from dotenv import load_dotenv
 
 # The SDK only reads a config file named explicitly (v0.3+); research
 # scripts opt in to the repo's config.yaml here, before touching the SDK.
-os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[0] / "config.yaml"))
+os.environ.setdefault("RMIC_CONFIG", str(Path(__file__).resolve().parents[1] / "config.yaml"))
+# Run as `python scripts/<name>.py`: make the repository's rmic_guard importable.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rmic_guard._core.audit_ledger import AuditLedger
 from rmic_guard._core.contract_loader import seal_contract_file
@@ -24,7 +26,7 @@ from rmic_guard._core.enforcement_engine import EnforcementEngine, EnforcementOu
 from rmic_guard._core.reasoning_layer import ReasoningLayer
 from rmic_guard._core.tool_layer import ToolRegistry
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]  # repository root
 
 
 def _dummy_tool(**kwargs: object) -> dict[str, object]:

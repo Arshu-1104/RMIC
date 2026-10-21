@@ -32,7 +32,7 @@ project.
    `rmic_guard/_core/reasoning_layer.py`, `rmic_guard/_core/ids_engine.py`), please explain your
    reasoning in the PR description — this project's core contribution is
    about *where* enforcement happens, so changes there get extra scrutiny.
-4. Run `python preflight_check.py` before opening the PR to confirm your
+4. Run `python scripts/preflight_check.py` before opening the PR to confirm your
    environment is sane.
 5. Open the PR against `main` with a clear description of what changed and why.
 
