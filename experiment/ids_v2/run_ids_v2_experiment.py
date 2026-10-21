@@ -98,6 +98,32 @@ MIN_AUC, MIN_CAUGHT, MAX_LEGIT_FLAGGED = 0.80, 10, 2
 AUC_BOOTSTRAP = 2000
 
 
+def install_embedding_cache() -> None:
+    """Memoise embeddings per text via the SDK's set_embedding_backend hook.
+
+    One IDS evaluation embeds the same message ~7 times and every anchor /
+    forbidden topic again on every call (~2-3 s per turn); the corpus needs
+    ~10k evaluations. The backend returns the same fastembed vectors (it calls
+    the model embed_texts would use), so scores are unchanged up to float
+    rounding from batch composition; embed_texts still L2-normalises them.
+    """
+    import numpy as np
+
+    from rmic_guard._core import embedder
+
+    model = embedder.get_model(None)
+    cache: dict[str, Any] = {}
+
+    def cached_backend(texts: list[str]) -> Any:
+        missing = [t for t in dict.fromkeys(texts) if t not in cache]
+        if missing:
+            for text, vec in zip(missing, model.embed(missing)):
+                cache[text] = np.asarray(vec, dtype=np.float32)
+        return np.stack([cache[t] for t in texts])
+
+    embedder.set_embedding_backend(cached_backend)
+
+
 # ── corpus ──────────────────────────────────────────────────────────────────
 
 
@@ -310,6 +336,7 @@ def guard_run(
 
 
 def run(out_md: Path, scores_csv: Path, guard_csv: Path) -> None:
+    install_embedding_cache()
     split = load_split()
     contracts = {
         n: {"v1": load_contract(REPO_ROOT / "contracts" / f"{n}.json"), "v2": load_contract(REPO_ROOT / "contracts" / "v2" / f"{n}.json")}
