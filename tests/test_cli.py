@@ -33,3 +33,7 @@ def test_init_seals_the_scaffolded_contract(tmp_path: Path, monkeypatch: pytest.
     )
     assert run.returncode == 0, run.stderr
     assert "decision=PASS" in run.stdout and "reason=forbidden_tool" in run.stdout
+
+
+def test_contract_template_passes_rmic_validate() -> None:
+    assert main(["validate", str(REPO / "contracts" / "examples" / "template.json")]) == 0
