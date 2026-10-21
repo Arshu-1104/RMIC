@@ -60,6 +60,10 @@ call and runs your function **only** if it is allowed.
 > score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
 > catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
 > [calibration report](https://github.com/Arshu-1104/RMIC/blob/main/experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+> To collect IDS data on real traffic without affecting any decision, use
+> `semantic="monitor"`: the IDS is computed and written to `GuardResult` (`ids_score`,
+> `ids_decision` = what `semantic=True` would have decided) and to the audit log, while the
+> hard rules alone decide.
 
 
 | `GuardResult` field | Meaning |

@@ -12,7 +12,9 @@
     print(result.allowed, result.decision, result.reason, result.output)
 
 Guard enforces the contract's hard rules by default; semantic identity-drift
-detection (``semantic=True``) is experimental and off by default.
+detection is experimental and off by default. ``semantic="monitor"`` computes
+and records the IDS without letting it change any decision; ``semantic=True``
+lets it enforce.
 
 Guard is a thin layer over the existing building blocks (RMICContract,
 ToolRegistry, EnforcementEngine, AuditLedger, the reasoning backends). It
@@ -27,7 +29,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Union
+from typing import Any, Callable, Iterable, Literal, Mapping, Union
 
 from rmic_guard._core.audit_ledger import AuditLedger
 from rmic_guard._core.contract_loader import (
@@ -45,6 +47,8 @@ __all__ = ["Guard", "GuardResult", "GuardSession"]
 
 ContractSource = Union[str, "os.PathLike[str]", Mapping[str, Any], RMICContract]
 ToolFn = Callable[..., Any]
+SemanticMode = Union[bool, Literal["monitor"]]
+_ENFORCEMENT_MODES = {False: "hard_rules_only", True: "full", "monitor": "monitor"}
 
 _ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN"})
 # Bounded so a long-lived session can't grow without limit; the IDS
@@ -67,6 +71,8 @@ class GuardResult:
     tool_name: str = ""
     executed: bool = False
     error: str | None = None
+    # semantic="monitor" only: what semantic enforcement would have decided.
+    ids_decision: str | None = None
     outcome: EnforcementOutcome | None = field(default=None, repr=False, compare=False)
 
     def __repr__(self) -> str:
@@ -76,6 +82,8 @@ class GuardResult:
         parts.append(f"ids_score={self.ids_score:.3f}")
         if self.output is not None:
             parts.append(f"output={self.output!r}")
+        if self.ids_decision is not None:
+            parts.append(f"ids_decision={self.ids_decision}")
         if self.error:
             parts.append(f"error={self.error!r}")
         if self.recovery_attempted:
@@ -291,13 +299,13 @@ class GuardSession:
             recent_ids=recent_ids,
             tool_call_history=tool_history,
             execute_tool=guard.tools.has(plan.tool_name),
-            enforcement_mode="full" if guard.semantic else "hard_rules_only",
+            enforcement_mode=_ENFORCEMENT_MODES[guard.semantic],
         )
 
         with self._state.lock:
             self._state.tool_history.append(plan.tool_name)
             del self._state.tool_history[:-_HISTORY_LIMIT]
-            if guard.semantic:
+            if guard.scores_ids:
                 self._state.recent_ids.append(float(outcome.ids_score))
                 del self._state.recent_ids[:-_HISTORY_LIMIT]
 
@@ -313,6 +321,7 @@ class GuardSession:
             tool_name=plan.tool_name,
             executed=tool_result is not None and tool_result.ok,
             error=tool_result.error if tool_result is not None and not tool_result.ok else None,
+            ids_decision=outcome.ids_decision,
             outcome=outcome,
         )
 
@@ -333,6 +342,10 @@ class Guard:
             than legitimate requests (see
             experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md),
             so semantic=True blocks legitimate calls without catching attacks.
+            "monitor" computes the IDS and records it in GuardResult
+            (ids_score, ids_decision = what semantic=True would have decided)
+            and the audit log, but never changes a decision: the hard rules
+            alone decide. Use it to collect IDS data on real traffic safely.
         audit_log: path of a JSONL audit log; every decision is appended and
             Ed25519-signed.
         audit_key: path of the signing key file (default: RMIC_AUDIT_KEY, else
@@ -346,13 +359,15 @@ class Guard:
         contract: ContractSource,
         *,
         tools: ToolRegistry | Mapping[str, ToolFn] | None = None,
-        semantic: bool = False,
+        semantic: SemanticMode = False,
         audit_log: str | os.PathLike | None = None,
         audit_key: str | os.PathLike | None = None,
         save_sealed: bool = False,
     ) -> None:
-        self.semantic = bool(semantic)
-        self.contract = _resolve_contract(contract, semantic=self.semantic, save_sealed=save_sealed)
+        if isinstance(semantic, str) and semantic != "monitor" or not isinstance(semantic, (bool, str)):
+            raise ValueError(f"semantic must be False, True or 'monitor', not {semantic!r}")
+        self.semantic: SemanticMode = semantic
+        self.contract = _resolve_contract(contract, semantic=self.scores_ids, save_sealed=save_sealed)
 
         if isinstance(tools, ToolRegistry):
             self.tools = tools
@@ -372,11 +387,16 @@ class Guard:
         self._default = self.session(_DEFAULT_SESSION)
 
     def __repr__(self) -> str:
-        mode = "semantic" if self.semantic else "hard-rules-only"
+        mode = {False: "hard-rules-only", True: "semantic", "monitor": "semantic-monitor"}[self.semantic]
         return (
             f"Guard(agent_id={self.contract.agent_id!r}, mode={mode}, "
             f"contract_hash={self.contract.contract_hash[:12]}...)"
         )
+
+    @property
+    def scores_ids(self) -> bool:
+        """True when the IDS is computed (semantic=True or "monitor")."""
+        return self.semantic is True or self.semantic == "monitor"
 
     # ---- tools ------------------------------------------------------------
 

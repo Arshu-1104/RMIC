@@ -23,7 +23,7 @@ __all__ = ["EnforcementEngine", "EnforcementMode", "EnforcementOutcome"]
 
 Decision = Literal["PASS", "BLOCK", "WARN", "NEEDS_RECOVERY", "PREEMPTIVE_WARN"]
 
-EnforcementMode = Literal["full", "hard_rules_only", "ids_only"]
+EnforcementMode = Literal["full", "hard_rules_only", "ids_only", "monitor"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,9 @@ class EnforcementOutcome:
     recovery_system_message: str | None
     recovery_user_message: str | None
     tool_result: ToolResult | None
+    # "monitor" mode only: what "full" mode would have decided from the IDS
+    # (PASS / PREEMPTIVE_WARN / NEEDS_RECOVERY / BLOCK). None in other modes.
+    ids_decision: str | None = None
 
 
 def _numeric_for_type(val: Any, value_type: str) -> float:
@@ -198,6 +201,9 @@ class EnforcementEngine:
           full — hard rules then IDS (default).
           hard_rules_only — Pass 1 only; if hard rules pass, PASS with ids_score=0 (no IDS).
           ids_only — Pass 2 only; skip hard rules, block only on IDS thresholds.
+          monitor — hard rules decide; the IDS is computed and recorded (outcome,
+            audit log) but never changes the decision. outcome.ids_decision holds
+            what "full" would have decided.
         """
         c = self.contract
         if enforcement_mode == "ids_only":
@@ -308,7 +314,9 @@ class EnforcementEngine:
         )
         vel = _velocity(recent_ids, ids_score)
 
-        def audit(decision: str, recovery_attempted: bool, *, sync_log: bool) -> None:
+        def audit(
+            decision: str, recovery_attempted: bool, *, sync_log: bool, failure_reason: str | None = None
+        ) -> None:
             self._log(
                 AuditEntry(
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -321,7 +329,7 @@ class EnforcementEngine:
                     drift_type=drift_type,
                     drift_velocity=vel,
                     decision=decision,
-                    failure_reason=(
+                    failure_reason=failure_reason or (
                         "ids_block_threshold_exceeded"
                         if decision == "BLOCK"
                         else ("ids_warn_threshold_reached" if decision == "WARN" else None)
@@ -332,6 +340,43 @@ class EnforcementEngine:
                     recovery_attempted=recovery_attempted,
                 ),
                 sync=sync_log,
+            )
+
+        if enforcement_mode == "monitor":
+            # Hard rules already passed. The IDS is measured and recorded but
+            # never changes the decision; ids_decision says what "full" mode
+            # would have done (also noted as failure_reason in the audit log).
+            if ids_score >= self.ids_block_threshold:
+                shadow = "BLOCK"
+            elif ids_score >= self.ids_warn_threshold:
+                shadow = "NEEDS_RECOVERY"
+            elif vel > self.drift_velocity_threshold:
+                shadow = "PREEMPTIVE_WARN"
+            else:
+                shadow = "PASS"
+            audit(
+                "PASS",
+                False,
+                sync_log=self.log_async is None or shadow != "PASS",
+                failure_reason=None if shadow == "PASS" else f"monitor:would_{shadow.lower()}",
+            )
+            monitored_result: ToolResult | None = None
+            if execute_tool:
+                monitored_result = self.tools.execute(
+                    plan.tool_name,
+                    approval_token=self._tool_approval_token,
+                    **plan.arguments,
+                )
+            return EnforcementOutcome(
+                decision="PASS",
+                ids_score=ids_score,
+                drift_velocity=vel,
+                ids_components=ids_components,
+                hard_rule_violation=None,
+                recovery_system_message=None,
+                recovery_user_message=None,
+                tool_result=monitored_result,
+                ids_decision=shadow,
             )
 
         if ids_score >= self.ids_block_threshold:

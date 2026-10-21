@@ -2,6 +2,29 @@
 
 All notable changes to `rmic-guard` are documented here.
 
+## Unreleased (v0.4-hardening)
+
+### Added
+
+- `Guard(..., semantic="monitor")`: the IDS is computed and recorded in `GuardResult`
+  (`ids_score`, new `ids_decision` field) and in the audit log (`failure_reason`
+  `monitor:would_<decision>` on a `PASS` entry), but never changes a decision. New
+  `EnforcementMode` `"monitor"` and `EnforcementOutcome.ids_decision`. The default stays
+  `semantic=False`.
+
+### Changed
+
+- IDS scoring embeds the scored text once per call (it was embedded once per signal, 7×) and
+  each contract's anchor/topic sets once, reusing them across calls. Scores are bit-identical
+  (3,200/3,200 component values on the bundled contracts); warm calls take ~8 ms instead of
+  ~560–710 ms on the measurement machine (`experiment/perf/ids_latency.md`).
+  `ids_metric.set_ids_embedding_cache(False)` restores the uncached path.
+
+### Fixed
+
+- The topic-embedding cache could return vectors from a previous embedding backend after
+  `set_embedding_backend()`; cache keys now include the backend generation.
+
 ## 0.3.0 — unreleased
 
 ### Added

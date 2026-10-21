@@ -68,6 +68,10 @@ deleted or reordered lines are detected too).
 > score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
 > catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
 > [calibration report](experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+> To collect IDS data on real traffic without affecting any decision, use
+> `semantic="monitor"`: the IDS is computed and written to `GuardResult` (`ids_score`,
+> `ids_decision` = what `semantic=True` would have decided) and to the audit log, while the
+> hard rules alone decide.
 
 By default (`semantic=False`) no embedding model is loaded and nothing touches the
 network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1.5`
