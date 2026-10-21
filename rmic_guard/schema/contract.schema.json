@@ -64,10 +64,83 @@
         "properties": {
           "min": { "type": "number" },
           "max": { "type": "number" },
-          "type": { "type": "string", "enum": ["float", "int"] }
+          "type": { "type": "string", "enum": ["float", "int"] },
+          "confirm_above": {
+            "type": "number",
+            "description": "Values above this (and not above max) return NEEDS_CONFIRMATION: the tool is not executed until guard.confirm(confirmation_id). Must be >= min and < max."
+          }
         }
       },
-      "description": "Numeric bounds per tool-call argument name, e.g. {\"amount\": {\"min\": 0, \"max\": 5000, \"type\": \"float\"}}."
+      "description": "Numeric bounds per tool-call argument name, e.g. {\"amount\": {\"min\": 0, \"max\": 50000, \"confirm_above\": 10000, \"type\": \"float\"}}."
+    },
+    "argument_rules": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Per-tool argument rules (tool names matched like allowed_actions, case-insensitively). An argument not in allowed_args BLOCKs with argument_not_allowed:<tool>:<arg>; a value that does not full-match its pattern BLOCKs with argument_pattern:<tool>:<arg>. Patterns apply to strings and numbers (matched by their decimal form) and to every element of a list of them; any other type (bool, null, object), or a value longer than max_length, fails. Regexes are compiled when the contract is loaded (invalid ones are rejected) and limited to 500 characters.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "allowed_args": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "patterns": {
+            "type": "object", "minProperties": 1,
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 500 }
+          },
+          "max_length": { "type": "integer", "minimum": 1, "default": 1024 }
+        }
+      }
+    },
+    "deny_patterns": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["packs"] }, { "required": ["custom"] }, { "required": ["prohibited_terms"] }],
+      "description": "Opt-in heuristics matched against the end user's message only (case-insensitive search). HEURISTICS: they catch explicit wording and are evaded by rewording. BLOCK reasons are deny_pattern:<pack>:<pattern_id>; action 'warn' lets the call proceed and reports the match in GuardResult.warnings.",
+      "properties": {
+        "packs": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "type": "string", "enum": ["role_reassignment", "objective_override", "guardrail_removal"] },
+              {
+                "type": "object", "required": ["name"], "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string", "enum": ["role_reassignment", "objective_override", "guardrail_removal"] },
+                  "action": { "type": "string", "enum": ["block", "warn"], "default": "block" }
+                }
+              }
+            ]
+          }
+        },
+        "custom": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["id", "regex"], "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$" },
+              "regex": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "action": { "type": "string", "enum": ["block", "warn"], "default": "block" }
+            }
+          }
+        },
+        "prohibited_terms": {
+          "type": "object", "required": ["terms"], "additionalProperties": false,
+          "description": "Words or phrases matched whole-word, case-insensitively (whitespace inside a phrase matches any whitespace). pattern_id = the term lower-cased with non-alphanumerics replaced by _.",
+          "properties": {
+            "terms": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+            "action": { "type": "string", "enum": ["block", "warn"], "default": "block" }
+          }
+        },
+        "max_scan_chars": {
+          "type": "integer", "minimum": 1, "default": 10000,
+          "description": "Only the first max_scan_chars characters of the user message are scanned. A longer message is still scanned up to that point and the result carries the warning deny_pattern_scan_truncated:<max_scan_chars>."
+        }
+      }
+    },
+    "confirmation_ttl_seconds": {
+      "type": "number", "exclusiveMinimum": 0, "default": 600,
+      "description": "Seconds a NEEDS_CONFIRMATION id stays valid; guard.confirm() of an older id fails (reason 'expired') and is audited. Guard(confirmation_ttl_seconds=...) overrides it."
     },
     "ids_warn_threshold": {
       "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,

@@ -1,0 +1,22 @@
+{
+  "agent_id": "my_agent",
+  "role_name": "My Agent",
+  "sector": "general",
+  "role_description": "One or two sentences on what this agent does and for whom.",
+  "semantic_anchors": [
+    "I help customers with questions about their orders.",
+    "I look up order status and explain delivery times.",
+    "I do not change payments, accounts or personal data."
+  ],
+  "allowed_actions": ["lookup_order", "answer_question"],
+  "forbidden_actions": ["issue_refund", "delete_account", "execute_code"],
+  "data_scope": {
+    "accessible": ["order_status"],
+    "prohibited": ["payment_details"],
+    "pii_categories": ["email"]
+  },
+  "parameter_constraints": {
+    "order_count": {"min": 1, "max": 20, "type": "int"}
+  },
+  "contract_version": "1.0.0"
+}

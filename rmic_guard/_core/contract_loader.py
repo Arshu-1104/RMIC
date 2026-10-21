@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
+from rmic_guard._core.hard_rules import ArgumentRule, DenyPatternConfig, parse_argument_rules, parse_deny_patterns
 from rmic_guard._core.validation import validate_contract_dict
 from rmic_guard._utils.config import load_config
 
@@ -75,6 +76,9 @@ class ParameterConstraint:
     max: float | int | None
     min: float | int | None
     value_type: str
+    # Values above this (and within max) return NEEDS_CONFIRMATION instead of
+    # executing. None = no confirmation step.
+    confirm_above: float | int | None = None
 
     @staticmethod
     def from_entry(name: str, spec: Mapping[str, Any]) -> ParameterConstraint:
@@ -83,7 +87,14 @@ class ParameterConstraint:
             max=spec.get("max"),
             min=spec.get("min"),
             value_type=str(spec.get("type", "float")),
+            confirm_above=spec.get("confirm_above"),
         )
+
+    def to_spec(self) -> dict[str, Any]:
+        spec: dict[str, Any] = {"min": self.min, "max": self.max, "type": self.value_type}
+        if self.confirm_above is not None:
+            spec["confirm_above"] = self.confirm_above
+        return spec
 
 
 @dataclass(frozen=True)
@@ -108,6 +119,13 @@ class RMICContract:
     created_at: str | None
     contract_hash: str
     anchor_embedding: tuple[float, ...]
+    # v0.4 hard-rule extensions (see rmic_guard._core.hard_rules). Empty/None
+    # when the contract does not define them; never serialised in that case,
+    # so contracts without them hash exactly as before.
+    argument_rules: tuple[ArgumentRule, ...] = ()
+    deny_patterns: DenyPatternConfig | None = None
+    # Seconds a NEEDS_CONFIRMATION id stays valid (None: the engine default).
+    confirmation_ttl_seconds: float | None = None
 
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
@@ -134,10 +152,7 @@ class RMICContract:
                 "prohibited": list(self.data_scope.prohibited),
                 "pii_categories": list(self.data_scope.pii_categories),
             },
-            "parameter_constraints": {
-                c.name: {"min": c.min, "max": c.max, "type": c.value_type}
-                for c in self.parameter_constraints
-            },
+            "parameter_constraints": {c.name: c.to_spec() for c in self.parameter_constraints},
             "ids_warn_threshold": self.ids_warn_threshold,
             "ids_block_threshold": self.ids_block_threshold,
             "drift_velocity_threshold": self.drift_velocity_threshold,
@@ -147,6 +162,12 @@ class RMICContract:
             "created_at": self.created_at,
             "contract_hash": self.contract_hash,
         }
+        if self.argument_rules:
+            d["argument_rules"] = {r.tool: json.loads(r.raw_json) for r in self.argument_rules}
+        if self.deny_patterns is not None:
+            d["deny_patterns"] = json.loads(self.deny_patterns.raw_json)
+        if self.confirmation_ttl_seconds is not None:
+            d["confirmation_ttl_seconds"] = self.confirmation_ttl_seconds
         if self.anchor_embedding:
             d["anchor_embedding"] = list(self.anchor_embedding)
         return d
@@ -226,6 +247,13 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
         created_at=data.get("created_at"),
         contract_hash=str(stored_hash or compute_contract_hash(data)),
         anchor_embedding=anchor_embedding,
+        # Already validated by validate_contract_dict above, so these cannot raise.
+        argument_rules=parse_argument_rules(
+            data.get("argument_rules"), allowed_actions=_as_tuple_str(data.get("allowed_actions"))
+        ),
+        deny_patterns=parse_deny_patterns(data.get("deny_patterns")),
+        # Kept as written (int or float) so to_dict() hashes identically.
+        confirmation_ttl_seconds=data.get("confirmation_ttl_seconds"),
     )
 
 
@@ -251,11 +279,14 @@ def _seal_dict(
     source: str | None,
     model_name: str | None = None,
     require_embedding: bool = True,
+    stamp_created_at: bool = False,
 ) -> dict[str, Any]:
     """Return a sealed copy of a raw contract dict (never mutates ``data``).
 
     Validates the pre-seal shape, computes anchor_embedding (when
-    require_embedding) and contract_hash, and fills created_at if missing.
+    require_embedding) and contract_hash. created_at is filled in (when
+    missing) only with stamp_created_at, i.e. when the sealed contract is
+    written to disk: an in-memory seal must hash the same way on every load.
     """
     sealed = {k: v for k, v in dict(data).items() if k not in ("anchor_embedding", "contract_hash")}
     validate_contract_dict(sealed, source=source)
@@ -267,7 +298,7 @@ def _seal_dict(
         centroid = anchor_centroid_from_anchors(list(anchors), model_name=model_name)
         sealed["anchor_embedding"] = [float(x) for x in centroid.tolist()]
 
-    if sealed.get("created_at") in (None, ""):
+    if stamp_created_at and sealed.get("created_at") in (None, ""):
         sealed["created_at"] = datetime.now(timezone.utc).isoformat()
 
     sealed["contract_hash"] = compute_contract_hash(sealed)
@@ -295,7 +326,13 @@ def load_contract(
     p = Path(path)
     raw = _read_contract_json(p)
     if auto_seal and not raw.get("contract_hash"):
-        sealed = _seal_dict(raw, source=str(p), model_name=model_name, require_embedding=require_embedding)
+        sealed = _seal_dict(
+            raw,
+            source=str(p),
+            model_name=model_name,
+            require_embedding=require_embedding,
+            stamp_created_at=write_back,
+        )
         if write_back:
             _write_contract_json(p, sealed)
         return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
@@ -318,7 +355,7 @@ def seal_contract_file(
     untouched. Pass write_back=True (or run `rmic seal <file>`) to persist it.
     """
     p = Path(path)
-    sealed = _seal_dict(_read_contract_json(p), source=str(p), model_name=model_name)
+    sealed = _seal_dict(_read_contract_json(p), source=str(p), model_name=model_name, stamp_created_at=write_back)
     if write_back:
         _write_contract_json(p, sealed)
     return _contract_from_dict(sealed, require_hash_match=True, source=str(p))
@@ -356,6 +393,9 @@ def create_contract(
     recovery_policy: str = "re-anchor",
     compliance_tags: list[str] | None = None,
     contract_version: str = "1.0.0",
+    argument_rules: Mapping[str, Mapping[str, Any]] | None = None,
+    deny_patterns: Mapping[str, Any] | None = None,
+    confirmation_ttl_seconds: float | None = None,
     save_to: str | Path | None = None,
     model_name: str | None = None,
     require_embedding: bool = True,
@@ -414,6 +454,14 @@ def create_contract(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Only written when given, so contracts without them hash exactly as before.
+    if argument_rules is not None:
+        data["argument_rules"] = json.loads(json.dumps(argument_rules))
+    if deny_patterns is not None:
+        data["deny_patterns"] = json.loads(json.dumps(deny_patterns))
+    if confirmation_ttl_seconds is not None:
+        data["confirmation_ttl_seconds"] = confirmation_ttl_seconds
+
     validate_contract_dict(data, source="RMICContract.create(...)")
 
     if require_embedding:
@@ -443,6 +491,9 @@ _EXAMPLE_CONTRACTS = (
     "healthcare_research_agent",
     "legal_review_agent",
     "support_agent",
+    # financial_agent + confirm_above and account-format argument patterns
+    # (v0.4); a copy of contracts/examples/financial_agent_hardened.json.
+    "financial_agent_hardened",
 )
 
 

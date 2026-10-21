@@ -15,12 +15,12 @@ ibm_pilot/agent_example.py already wire together:
 No IBM SDK is required to run this file. It stands in for the Orchestrate
 agent's own planning step using the repository's existing
 rmic_guard._core.reasoning_layer.ReasoningLayer — the same class the repository's own
-top-level demo.py already uses — so tool_name/arguments below are real
+scripts/demo.py already uses — so tool_name/arguments below are real
 model output, not hardcoded, and the four required scenarios can be
 demonstrated without a live Orchestrate instance.
 
 Run from the repository root (needs ANTHROPIC_API_KEY or GROQ_API_KEY set,
-exactly like the repository's own demo.py):
+exactly like the repository's own scripts/demo.py):
     python ibm_pilot/demo.py
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ ROOT = config.REPO_ROOT
 
 
 def _is_insufficient_credits_error(exc: BaseException) -> bool:
-    """Same detection the repository's top-level demo.py uses, copied
+    """Same detection the repository's scripts/demo.py uses, copied
     verbatim so this file gives the same actionable error message without
     importing a private helper from another script."""
     msg = str(exc).lower()
@@ -97,7 +97,7 @@ def main() -> None:
 
     # Stands in for the IBM watsonx Orchestrate agent's own planning step.
     # Reuses rmic_guard._core.reasoning_layer.ReasoningLayer exactly as the repository's
-    # own demo.py does — tool_name/arguments are real model output.
+    # own scripts/demo.py does — tool_name/arguments are real model output.
     reasoning = ReasoningLayer()
 
     # Reuses ibm_pilot.rmic_guard_tool.RMICGuardTool, which itself reuses

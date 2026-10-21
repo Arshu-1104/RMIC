@@ -1,0 +1,3 @@
+# Frozen evaluation sets: keep bytes exact so SHA256SUMS stays valid on every checkout.
+prompts/external/** -text
+prompts/v3/generated/** -text

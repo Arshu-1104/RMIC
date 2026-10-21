@@ -34,6 +34,9 @@ DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # fastembed model name; downloade
 # The callable takes list[str] and must return an (n, dim) float32 array;
 # embed_texts() L2-normalises the result for you.
 _embedding_backend: Any = None
+# Bumped whenever the backend changes, so caches of embeddings (see
+# ids_metric._topic_embeddings) never serve vectors from a previous backend.
+_backend_generation = 0
 
 
 def set_embedding_backend(fn: Any | None) -> None:
@@ -43,12 +46,18 @@ def set_embedding_backend(fn: Any | None) -> None:
     embed_texts() calls this instead of loading fastembed/sentence-transformers,
     so no network access or local model file is required.
     """
-    global _embedding_backend
+    global _embedding_backend, _backend_generation
     _embedding_backend = fn
+    _backend_generation += 1
 
 
 def get_embedding_backend() -> Any | None:
     return _embedding_backend
+
+
+def backend_generation() -> int:
+    """Changes every time set_embedding_backend() is called; part of embedding cache keys."""
+    return _backend_generation
 
 
 _INSTALL_HINT = (

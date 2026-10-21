@@ -6,6 +6,8 @@ end-to-end in a live agent conversation. This is distinct from
 `ibm_pilot/README.md`, which documents an earlier local simulation of
 the same integration.
 
+**Demo video:** https://youtu.be/xQer0t_11fo
+
 ## 1. What was deployed
 
 | Component | Status |

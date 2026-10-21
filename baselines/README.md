@@ -1,5 +1,7 @@
 # Baselines: Lakera Guard, NeMo Guardrails & AgentDojo comparison
 
+Runs the experiment's prompt corpus through third-party guardrails to compare them with RMIC-Guard.
+
 These scripts run the exact same prompt set (`prompts/*.json`, all 4
 roles from `contracts/`) through Lakera Guard, NeMo Guardrails, and
 AgentDojo's local prompt-injection detector, writing results into the

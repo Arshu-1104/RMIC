@@ -1,5 +1,7 @@
 # IBM watsonx Orchestrate RMIC-Guard Pilot
 
+RMIC-Guard as a tool for IBM watsonx Orchestrate agents: adapter, standalone tools, agent definitions and demos.
+
 > **Status: this pilot has since been deployed live** to a real watsonx
 > Orchestrate trial instance and verified end-to-end in a live agent
 > conversation. See [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md) for the
@@ -65,9 +67,11 @@ RMIC/
 ├── dashboard/
 ├── experiment/
 │
+├── scripts/
+│ └── seal_contracts.py
+│
 ├── config.yaml
 ├── pyproject.toml
-├── seal_contracts.py
 └── requirements.txt
 ```
 
@@ -137,11 +141,10 @@ The pilot requires an API key configured for the model provider used by the reas
 
 ## 7. Running the Demo
 
-Seal the identity contracts before running the demo:
-
-```
-python seal_contracts.py
-```
+The identity contracts in `contracts/` ship sealed, so there is nothing to seal
+before running the demo. (`python scripts/seal_contracts.py` re-seals them, but it
+refuses the frozen research contracts unless `--force` is passed: re-sealing changes
+their hashes.)
 
 Run the pilot demo:
 
@@ -150,6 +153,10 @@ python ibm_pilot/demo.py
 ```
 
 Running the demo executes the four scenarios described in Section 4 against the existing RMIC enforcement engine via the IBM pilot adapter, printing the expected and actual ALLOW/BLOCK decision for each scenario.
+
+For a single request through the adapter (support_agent, no API key needed), run
+`python ibm_pilot/run_single.py`. It verifies the sealed contract (or seals an
+unsealed one in memory) and never writes the contract file.
 
 ## 8. Running Tests
 

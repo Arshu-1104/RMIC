@@ -30,8 +30,22 @@ def _char_ngram_embed(texts: list[str]) -> np.ndarray:
     return out
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Most tests pass unsealed contract dicts on purpose; the "not sealed"
+    # warning is asserted explicitly where it matters (pytest.warns still sees it).
+    config.addinivalue_line("filterwarnings", "ignore::rmic_guard.RMICGuardWarning")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _deterministic_embeddings() -> None:
     set_embedding_backend(_char_ngram_embed)
     yield
     set_embedding_backend(None)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Research modules (e.g. ibm_pilot.config, imported when its tests run in
+    the same pytest process) set RMIC_CONFIG to the repo config.yaml, whose
+    thresholds then override every contract's. SDK tests must not inherit it."""
+    monkeypatch.delenv("RMIC_CONFIG", raising=False)

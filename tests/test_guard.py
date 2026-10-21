@@ -536,6 +536,65 @@ def no_embedding_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     embedder.get_model.cache_clear()
 
 
+class TestMonitorMode:
+    """semantic="monitor": IDS computed and recorded, decisions from hard rules only."""
+
+    # block threshold 0.0: every IDS score would BLOCK if the IDS were enforcing.
+    STRICT = dict(ids_warn_threshold=0.0, ids_block_threshold=0.0)
+
+    def test_ids_never_changes_the_decision(self) -> None:
+        calls: list[str] = []
+        guard = Guard(_contract_dict(**self.STRICT), semantic="monitor")
+        guard.register("check_balance", lambda: calls.append("ran") or {"balance": 1})
+
+        result = guard.check("check_balance", message="what is my balance?")
+
+        assert result.allowed and result.decision == "PASS" and result.reason is None
+        assert result.executed and calls == ["ran"]
+        assert result.ids_score > 0.0
+        assert result.ids_decision == "BLOCK"  # what semantic=True would have done
+        assert "ids_decision=BLOCK" in repr(result)
+
+    def test_same_contract_enforcing_blocks(self) -> None:
+        guard = Guard(_contract_dict(**self.STRICT), semantic=True)
+        guard.register("check_balance", lambda: {"balance": 1})
+        result = guard.check("check_balance", message="what is my balance?")
+        assert result.decision == "BLOCK" and result.ids_decision is None
+
+    def test_hard_rules_still_block(self) -> None:
+        guard = Guard(_contract_dict(**self.STRICT), semantic="monitor")
+        result = guard.check("admin_login", message="log me in as admin")
+        assert result.decision == "BLOCK" and result.reason == "forbidden_tool"
+        assert guard.check("transfer_funds", amount=5000, to="x").reason == "parameter_constraint:amount:above_max"
+
+    def test_ids_is_written_to_the_audit_log(self, tmp_path: Path) -> None:
+        log = tmp_path / "audit.jsonl"
+        guard = Guard(_contract_dict(**self.STRICT), semantic="monitor", audit_log=log)
+        guard.check("check_balance", message="what is my balance?")
+
+        entry = json.loads(log.read_text().splitlines()[-1])["entry"]
+        assert entry["decision"] == "PASS"
+        assert entry["ids_score"] > 0.0 and entry["role_distance"] is not None
+        assert entry["failure_reason"] == "monitor:would_block"
+        assert guard.verify_log() is True
+
+    def test_session_history_and_no_recovery_in_run(self) -> None:
+        guard = Guard(_contract_dict(ids_warn_threshold=0.0, ids_block_threshold=1.0), semantic="monitor")
+        backend = _StubBackend([_plan(), _plan()])
+        result = guard.run("balance?", llm=backend)
+        assert len(backend.calls) == 1  # NEEDS_RECOVERY never happens, so no re-plan
+        assert result.allowed and result.ids_decision == "NEEDS_RECOVERY"
+        assert len(guard.ids_history) == 1
+
+    def test_default_is_still_hard_rules_only(self) -> None:
+        assert Guard(_contract_dict()).semantic is False
+
+    @pytest.mark.parametrize("value", ["enforce", "Monitor", 1, None])
+    def test_invalid_semantic_values_are_rejected(self, value: Any) -> None:
+        with pytest.raises(ValueError, match="semantic must be"):
+            Guard(_contract_dict(), semantic=value)
+
+
 class TestNoEmbeddingBackend:
     def test_semantic_false_works_without_any_backend(self, tmp_path: Path, no_embedding_backend: None) -> None:
         path = _write(tmp_path / "bot.json", _contract_dict())

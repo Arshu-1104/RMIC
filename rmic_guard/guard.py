@@ -12,7 +12,9 @@
     print(result.allowed, result.decision, result.reason, result.output)
 
 Guard enforces the contract's hard rules by default; semantic identity-drift
-detection (``semantic=True``) is experimental and off by default.
+detection is experimental and off by default. ``semantic="monitor"`` computes
+and records the IDS without letting it change any decision; ``semantic=True``
+lets it enforce.
 
 Guard is a thin layer over the existing building blocks (RMICContract,
 ToolRegistry, EnforcementEngine, AuditLedger, the reasoning backends). It
@@ -23,21 +25,29 @@ signed audit log, and runs the re-anchoring recovery loop for LLM plans.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import threading
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Union
+from typing import Any, Callable, Iterable, Literal, Mapping, Union
 
 from rmic_guard._core.audit_ledger import AuditLedger
 from rmic_guard._core.contract_loader import (
     RMICContract,
     _contract_from_dict,
+    _read_contract_json,
     _seal_dict,
     load_contract,
 )
-from rmic_guard._core.enforcement_engine import EnforcementEngine, EnforcementOutcome
-from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError
+from rmic_guard._core.enforcement_engine import (
+    DEFAULT_MAX_PENDING_CONFIRMATIONS,
+    EnforcementEngine,
+    EnforcementOutcome,
+    PendingConfirmation,
+)
+from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError, RMICGuardWarning
 from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry
 
@@ -45,8 +55,10 @@ __all__ = ["Guard", "GuardResult", "GuardSession"]
 
 ContractSource = Union[str, "os.PathLike[str]", Mapping[str, Any], RMICContract]
 ToolFn = Callable[..., Any]
+SemanticMode = Union[bool, Literal["monitor"]]
+_ENFORCEMENT_MODES = {False: "hard_rules_only", True: "full", "monitor": "monitor"}
 
-_ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN"})
+_ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN", "CONFIRMED"})
 # Bounded so a long-lived session can't grow without limit; the IDS
 # trajectory and tool-frequency signals only look at a recent window anyway.
 _HISTORY_LIMIT = 100
@@ -67,6 +79,14 @@ class GuardResult:
     tool_name: str = ""
     executed: bool = False
     error: str | None = None
+    # semantic="monitor" only: what semantic enforcement would have decided.
+    ids_decision: str | None = None
+    # NEEDS_CONFIRMATION: pass to guard.confirm() to execute the call (single use).
+    confirmation_id: str | None = None
+    # Contract deny_patterns with action "warn" that matched (the call proceeded),
+    # and deny_pattern_scan_truncated:<N> when the message was longer than the
+    # contract's deny_patterns.max_scan_chars and only its start was scanned.
+    warnings: tuple[str, ...] = ()
     outcome: EnforcementOutcome | None = field(default=None, repr=False, compare=False)
 
     def __repr__(self) -> str:
@@ -76,6 +96,12 @@ class GuardResult:
         parts.append(f"ids_score={self.ids_score:.3f}")
         if self.output is not None:
             parts.append(f"output={self.output!r}")
+        if self.ids_decision is not None:
+            parts.append(f"ids_decision={self.ids_decision}")
+        if self.confirmation_id is not None:
+            parts.append(f"confirmation_id={self.confirmation_id!r}")
+        if self.warnings:
+            parts.append(f"warnings={list(self.warnings)}")
         if self.error:
             parts.append(f"error={self.error!r}")
         if self.recovery_attempted:
@@ -88,6 +114,8 @@ class GuardResult:
 def _reason_for(outcome: EnforcementOutcome) -> str | None:
     if outcome.hard_rule_violation:
         return outcome.hard_rule_violation
+    if outcome.decision == "NEEDS_CONFIRMATION":
+        return outcome.confirmation_reason
     if outcome.decision == "BLOCK":
         return "ids_block_threshold_exceeded"
     if outcome.decision == "NEEDS_RECOVERY":
@@ -121,9 +149,12 @@ def _resolve_contract(
         source = "Guard(<dict contract>)"
         data = dict(contract)
         if not data.get("contract_hash"):
+            _warn_unsealed(f"Contract {data.get('agent_id')!r} (a dict)", "rmic seal <file>")
             data = _seal_dict(data, source=source, require_embedding=semantic)
         resolved = _contract_from_dict(data, require_hash_match=True, source=source)
     elif isinstance(contract, (str, os.PathLike)):
+        if not save_sealed and not _read_contract_json(Path(contract)).get("contract_hash"):
+            _warn_unsealed(f"Contract file {os.fspath(contract)!r}", f"rmic seal {os.fspath(contract)}")
         resolved = load_contract(
             Path(contract),
             auto_seal=True,
@@ -142,6 +173,17 @@ def _resolve_contract(
             "Guard(..., semantic=False) for hard-rules-only enforcement."
         )
     return resolved
+
+
+def _warn_unsealed(what: str, seal_command: str) -> None:
+    warnings.warn(
+        f"{what} is not sealed, so it was sealed in memory for this process only: its "
+        "contract_hash is not stored anywhere, edits cannot be detected as tampering, and with "
+        "semantic=True the hash depends on this machine's embedding model. Seal it once with "
+        f"`{seal_command}` and distribute the sealed file.",
+        RMICGuardWarning,
+        stacklevel=4,
+    )
 
 
 def _make_reasoning_backend(llm: Any) -> Any:
@@ -233,6 +275,7 @@ class GuardSession:
             arguments=args,
             raw_text=message or "",
             data_categories_accessed=_as_categories(data),
+            user_message=message or "",
         )
         return self._enforce(plan)
 
@@ -246,7 +289,7 @@ class GuardSession:
         backend = self._guard._backend_for(llm)
         contract = self._guard.contract
         plan = backend.plan_tool_call(user_message, contract=contract, condition="C")
-        result = self._enforce(plan)
+        result = self._enforce(dataclasses.replace(plan, user_message=user_message))
 
         attempts = 0
         while result.decision == "NEEDS_RECOVERY" and attempts < max_recovery:
@@ -259,7 +302,7 @@ class GuardSession:
                 condition="C",
                 extra_system=outcome.recovery_system_message if outcome else None,
             )
-            result = self._enforce(plan, recovery_attempted=True)
+            result = self._enforce(dataclasses.replace(plan, user_message=user_message), recovery_attempted=True)
 
         if result.decision == "NEEDS_RECOVERY":
             # Recovery budget exhausted (or max_recovery=0): never let a
@@ -291,13 +334,13 @@ class GuardSession:
             recent_ids=recent_ids,
             tool_call_history=tool_history,
             execute_tool=guard.tools.has(plan.tool_name),
-            enforcement_mode="full" if guard.semantic else "hard_rules_only",
+            enforcement_mode=_ENFORCEMENT_MODES[guard.semantic],
         )
 
         with self._state.lock:
             self._state.tool_history.append(plan.tool_name)
             del self._state.tool_history[:-_HISTORY_LIMIT]
-            if guard.semantic:
+            if guard.scores_ids:
                 self._state.recent_ids.append(float(outcome.ids_score))
                 del self._state.recent_ids[:-_HISTORY_LIMIT]
 
@@ -313,6 +356,9 @@ class GuardSession:
             tool_name=plan.tool_name,
             executed=tool_result is not None and tool_result.ok,
             error=tool_result.error if tool_result is not None and not tool_result.ok else None,
+            ids_decision=outcome.ids_decision,
+            confirmation_id=outcome.confirmation_id if outcome.decision == "NEEDS_CONFIRMATION" else None,
+            warnings=outcome.warnings,
             outcome=outcome,
         )
 
@@ -333,12 +379,25 @@ class Guard:
             than legitimate requests (see
             experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md),
             so semantic=True blocks legitimate calls without catching attacks.
+            "monitor" computes the IDS and records it in GuardResult
+            (ids_score, ids_decision = what semantic=True would have decided)
+            and the audit log, but never changes a decision: the hard rules
+            alone decide. Use it to collect IDS data on real traffic safely.
         audit_log: path of a JSONL audit log; every decision is appended and
             Ed25519-signed.
         audit_key: path of the signing key file (default: RMIC_AUDIT_KEY, else
             ``<audit_log>.key``, created on first use).
         save_sealed: write a freshly sealed contract back to its file. Only
             meaningful when ``contract`` is a path; off by default.
+        confirmation_ttl_seconds: how long a NEEDS_CONFIRMATION id stays
+            valid for confirm(). If the contract sets
+            ``confirmation_ttl_seconds`` that is a ceiling: a shorter value
+            here applies, a longer one is ignored with an RMICGuardWarning.
+            Without a contract value, this (default 600) applies.
+        max_pending_confirmations: how many confirmations may wait at once
+            (default 100); issuing one more evicts the oldest. confirm() of an
+            expired or evicted id raises ConfirmationNotFoundError (``reason``
+            "expired" / "evicted") and is recorded in the audit log.
     """
 
     def __init__(
@@ -346,13 +405,17 @@ class Guard:
         contract: ContractSource,
         *,
         tools: ToolRegistry | Mapping[str, ToolFn] | None = None,
-        semantic: bool = False,
+        semantic: SemanticMode = False,
         audit_log: str | os.PathLike | None = None,
         audit_key: str | os.PathLike | None = None,
         save_sealed: bool = False,
+        confirmation_ttl_seconds: float | None = None,
+        max_pending_confirmations: int = DEFAULT_MAX_PENDING_CONFIRMATIONS,
     ) -> None:
-        self.semantic = bool(semantic)
-        self.contract = _resolve_contract(contract, semantic=self.semantic, save_sealed=save_sealed)
+        if isinstance(semantic, str) and semantic != "monitor" or not isinstance(semantic, (bool, str)):
+            raise ValueError(f"semantic must be False, True or 'monitor', not {semantic!r}")
+        self.semantic: SemanticMode = semantic
+        self.contract = _resolve_contract(contract, semantic=self.scores_ids, save_sealed=save_sealed)
 
         if isinstance(tools, ToolRegistry):
             self.tools = tools
@@ -364,7 +427,13 @@ class Guard:
         if audit_log is None and audit_key is not None:
             raise ValueError("audit_key was given without audit_log")
         self.ledger = AuditLedger(audit_log, key_path=audit_key) if audit_log is not None else None
-        self.engine = EnforcementEngine(contract=self.contract, tools=self.tools, ledger=self.ledger)
+        self.engine = EnforcementEngine(
+            contract=self.contract,
+            tools=self.tools,
+            ledger=self.ledger,
+            confirmation_ttl_seconds=confirmation_ttl_seconds,
+            max_pending_confirmations=max_pending_confirmations,
+        )
 
         self._backends: dict[str, Any] = {}
         self._sessions: dict[str, _SessionState] = {}
@@ -372,11 +441,16 @@ class Guard:
         self._default = self.session(_DEFAULT_SESSION)
 
     def __repr__(self) -> str:
-        mode = "semantic" if self.semantic else "hard-rules-only"
+        mode = {False: "hard-rules-only", True: "semantic", "monitor": "semantic-monitor"}[self.semantic]
         return (
             f"Guard(agent_id={self.contract.agent_id!r}, mode={mode}, "
             f"contract_hash={self.contract.contract_hash[:12]}...)"
         )
+
+    @property
+    def scores_ids(self) -> bool:
+        """True when the IDS is computed (semantic=True or "monitor")."""
+        return self.semantic is True or self.semantic == "monitor"
 
     # ---- tools ------------------------------------------------------------
 
@@ -434,6 +508,46 @@ class Guard:
     def run(self, user_message: str, *, llm: Any, max_recovery: int = 1) -> GuardResult:
         """Plan with an LLM and enforce, in the default session. See GuardSession.run."""
         return self._default.run(user_message, llm=llm, max_recovery=max_recovery)
+
+    def confirm(self, confirmation_id: str) -> GuardResult:
+        """Execute a call that returned NEEDS_CONFIRMATION (e.g. an amount above
+        the contract's confirm_above). Executes exactly once: the id is consumed
+        and a second confirm() -- or an unknown id -- raises
+        ConfirmationNotFoundError. So does an id older than
+        confirmation_ttl_seconds or evicted by max_pending_confirmations
+        (error.reason "expired" / "evicted"; the failure is audited). The
+        confirmation is written to the audit log."""
+        pending_plan = self.engine.pending_plan(confirmation_id)
+        execute = pending_plan is not None and self.tools.has(pending_plan.tool_name)
+        outcome = self.engine.confirm(confirmation_id, execute_tool=execute)
+        tool_result = outcome.tool_result
+        return GuardResult(
+            allowed=outcome.decision in _ALLOWED_DECISIONS,
+            decision=outcome.decision,
+            reason=outcome.hard_rule_violation,
+            ids_score=0.0,
+            output=tool_result.data if tool_result is not None and tool_result.ok else None,
+            contract_hash=self.contract.contract_hash,
+            tool_name=pending_plan.tool_name if pending_plan is not None else "",
+            executed=tool_result is not None and tool_result.ok,
+            error=tool_result.error if tool_result is not None and not tool_result.ok else None,
+            confirmation_id=confirmation_id,
+            outcome=outcome,
+        )
+
+    def pending_confirmations(self) -> tuple[PendingConfirmation, ...]:
+        """Calls awaiting confirm(), oldest first: confirmation_id, tool_name,
+        arguments, reason, created_at and expires_at (UTC datetimes). Expired
+        ones are not listed. Use it to show or cancel pending requests."""
+        return self.engine.list_pending_confirmations()
+
+    def cancel(self, confirmation_id: str) -> PendingConfirmation:
+        """Withdraw a pending confirmation without running the tool; returns
+        what was cancelled. The cancellation is written to the audit log
+        (BLOCK, failure_reason confirmation_cancelled, same confirmation_id)
+        and a later confirm() raises ConfirmationNotFoundError (reason
+        "cancelled"). An id that is not pending raises ConfirmationNotFoundError."""
+        return self.engine.cancel(confirmation_id)
 
     def _backend_for(self, llm: Any) -> Any:
         if not isinstance(llm, str):

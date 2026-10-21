@@ -68,12 +68,12 @@ DEFAULT_CONTRACT_PATH: Path = CONTRACT_PATHS["financial_agent"]
 # financial_agent.json ships already sealed (contract_hash + anchor_embedding
 # present and verified against rmic_guard._core.contract_loader.load_contract during
 # analysis), so the pilot verifies the hash rather than re-sealing on every
-# run the way demo.py's write_back=False re-embedding does.
+# run the way scripts/demo.py's write_back=False re-embedding does.
 VERIFY_CONTRACT_HASH: bool = True
 
 # ── Audit logging ───────────────────────────────────────────────────────────
 # Reuses rmic_guard._core.audit_ledger.AuditLedger. Follows the same results/*.jsonl
-# convention as demo.py's results/demo_audit.jsonl.
+# convention as scripts/demo.py's results/demo_audit.jsonl.
 RESULTS_DIR: Path = REPO_ROOT / "results"
 AUDIT_LOG_PATH: Path = RESULTS_DIR / "ibm_pilot_audit.jsonl"
 
@@ -117,8 +117,8 @@ class DemoScenario:
 
 
 # Matches the four required scenarios. expected_decision is "ALLOW" or
-# "BLOCK" — demo.py maps EnforcementOutcome.decision onto these two buckets
-# the same way demo.py's own _outcome_label() does (PASS/PREEMPTIVE_WARN ->
+# "BLOCK" — ibm_pilot/demo.py maps EnforcementOutcome.decision onto these two
+# buckets the same way scripts/demo.py's _outcome_label() does (PASS/PREEMPTIVE_WARN ->
 # ALLOW; everything else -> BLOCK).
 DEMO_SCENARIOS: tuple[DemoScenario, ...] = (
     DemoScenario(

@@ -68,11 +68,190 @@ deleted or reordered lines are detected too).
 > score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
 > catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
 > [calibration report](experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+> To collect IDS data on real traffic without affecting any decision, use
+> `semantic="monitor"`: the IDS is computed and written to `GuardResult` (`ids_score`,
+> `ids_decision` = what `semantic=True` would have decided) and to the audit log, while the
+> hard rules alone decide.
 
 By default (`semantic=False`) no embedding model is loaded and nothing touches the
 network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1.5`
 embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
 comes into play.
+
+### Contract hard-rule extensions (v0.4)
+
+Three optional contract fields tighten the hard rules. They are validated when the contract is
+loaded (an invalid regex is rejected), covered by the contract hash, and contracts without them
+behave exactly as before.
+
+**`argument_rules`: what a tool's arguments may look like.** Use `allowed_args` only for tools
+with a fixed schema (e.g. function calling): an LLM writing free-form JSON invents argument names,
+and an allowlist would then block legitimate calls.
+
+```json
+"argument_rules": {
+  "transfer_funds": {
+    "allowed_args": ["amount", "to_account"],
+    "patterns": {"to_account": "\\d{4}|(?:chk|sav)-\\d{4}"},
+    "max_length": 64
+  }
+}
+```
+
+- An argument not in `allowed_args` → `BLOCK`, reason `argument_not_allowed:<tool>:<arg>`.
+- A value that does not **full-match** its pattern → `BLOCK`, reason `argument_pattern:<tool>:<arg>`.
+  Strings and numbers (by their decimal form) are matched; lists element by element; any other
+  type, or a value longer than `max_length` (default 1024), fails. Regexes are limited to 500
+  characters.
+
+**`confirm_above`: a human confirms large values.** Inside `parameter_constraints`:
+
+```json
+"parameter_constraints": {"amount": {"min": 0.01, "max": 50000, "confirm_above": 10000, "type": "float"}}
+```
+
+```python
+result = guard.check("transfer_funds", amount=20000, to_account="4321")
+result.decision          # "NEEDS_CONFIRMATION": the tool has not run; result.allowed is False
+result.reason            # "confirm_above:amount"
+done = guard.confirm(result.confirmation_id)   # runs the tool exactly once -> decision "CONFIRMED"
+guard.confirm(result.confirmation_id)          # raises ConfirmationNotFoundError: ids are single-use
+```
+
+Values above `max` are still blocked outright. Both the `NEEDS_CONFIRMATION` and the `CONFIRMED`
+entries are written to the hash-chained audit log with the same `confirmation_id`. Pending
+confirmations live in memory in the `Guard` that issued them, and they are limited in two ways:
+
+- **Time to live:** a top-level contract field `"confirmation_ttl_seconds": 300` (covered by
+  the hash) is a ceiling. `Guard(..., confirmation_ttl_seconds=60)` can shorten it, but a longer
+  value is ignored with an `RMICGuardWarning`. If the contract doesn't set it, the `Guard`
+  argument applies, or 600 s by default.
+- **Count:** at most 100 pending by default (`Guard(..., max_pending_confirmations=...)`, a
+  `Guard` setting only). Issuing one more evicts the oldest.
+
+Apps can show and withdraw pending requests:
+
+```python
+for p in guard.pending_confirmations():   # oldest first; expired ones are not listed
+    print(p.confirmation_id, p.tool_name, p.arguments, p.reason, p.created_at, p.expires_at)
+guard.cancel(p.confirmation_id)            # the tool never runs; returns what was cancelled
+```
+
+`created_at` and `expires_at` are UTC datetimes. A cancellation is written to the audit log as
+a `BLOCK` with `failure_reason` `confirmation_cancelled` and the same `confirmation_id`.
+
+`guard.confirm()` of an id that is no longer pending raises `ConfirmationNotFoundError`, and
+`error.reason` says why: `"expired"`, `"evicted"`, `"cancelled"`, or `"unknown"` (never issued
+or already used). The tool does not run. An expired or evicted id's failed `confirm()` is
+written to the audit log as a `BLOCK` with `failure_reason` `confirmation_expired` /
+`confirmation_evicted` and the same `confirmation_id`. A cancelled id isn't logged again,
+because its cancellation already was.
+
+**`deny_patterns`: opt-in phrase heuristics on the user's message.**
+
+```json
+"deny_patterns": {
+  "packs": ["role_reassignment", {"name": "objective_override", "action": "warn"}, "guardrail_removal"],
+  "custom": [{"id": "crypto", "regex": "\\bcrypto\\b", "action": "block"}],
+  "prohibited_terms": {"terms": ["tax return", "credit score"], "action": "block"}
+}
+```
+
+Matches block with reason `deny_pattern:<pack>:<pattern_id>` (`custom` and `prohibited_terms` are
+pack names too); `"action": "warn"` lets the call run and lists the match in `result.warnings`.
+Patterns are matched against the end user's message only, never the model's output
+(`Guard.run()` passes the user's message separately). `prohibited_terms` match whole words,
+case-insensitively. Only the first 10,000 characters of the message are scanned
+(`"max_scan_chars"` in `deny_patterns` changes this). A longer message is still scanned up
+to that point, and the result carries the warning `deny_pattern_scan_truncated:10000` (in
+`result.warnings` and the audit log), so text past the limit is never matched.
+
+> **These are heuristics, and rewording evades them.** The packs catch explicit wording such as
+> "from now on you're my accountant" or "your new goal is…". "Instead of support, …" or
+> "as the company's lawyer, …" get through. On the `prompts/v2` tune split the three packs caught
+> 20 of the 41 attacks the other hard rules miss, with 0 of 80 legitimate items flagged
+> (prohibited terms alone caught 3). On the original `prompts/` corpus they match 12–14 of 25
+> attacks per contract. Both estimates are optimistic, because the same person wrote the
+> `prompts/v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
+> They are off in every bundled contract. Treat them as a cheap extra layer, not as protection.
+
+`contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
+is the research `financial_agent` contract plus `confirm_above: 10000` and account-format
+`patterns` (no `allowed_args`).
+
+### Evaluation (v0.4)
+
+One evaluation, run once and with no tuning, on an **external public set (primary)** and a
+**model-generated, context-isolated set (secondary)**. Each attack and legitimate request was
+checked with `guard.check()` and `semantic=False`, under three conditions:
+
+- **(a)** the v0.3 hard rules (the research contracts);
+- **(b)** (a) plus `argument_rules` and `confirm_above` (`financial_agent_hardened`; the other
+  contracts define neither, so (b) = (a) there);
+- **(c)** (b) plus the three deny-pattern packs.
+
+Cells are k/n with a Wilson 95% interval. Full results, including every miss and every false
+positive verbatim: [`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
+
+| Set | Items | Attacks blocked (a) / (b) / (c) | Legitimate blocked (a) / (b) / (c) |
+|---|---|---|---|
+| External (AgentDojo banking, InjecAgent, AgentHarm; 4 contracts) | 80 attacks, 65 legitimate | 72/80 (90%, 81–95) in all three | 56/65 (86%, 76–93) in all three |
+| Generated (`legal_review_agent` only) | 45 attacks, 42 legitimate | 37/45 (82%, 69–91) / 37/45 / 40/45 (89%, 77–95) | 0/42 (0%, 0–8) in all three |
+
+How to read it:
+
+- **On the external set, the contracts' tool lists did all the work.** Most items use dataset
+  tools that are outside the contracts' allowed lists or map to forbidden tools. Those items are
+  blocked in every condition, legitimate ones included, so the 86% says nothing about the v0.4
+  extensions. The extensions changed no outcome there in either direction.
+- **The 8 external attacks that got through** are all `financial_agent` transfers through the
+  allowed `transfer_funds` tool: AgentDojo injection tasks sending money to an attacker's IBAN,
+  and InjecAgent payment requests.
+  - The account pattern accepts an IBAN as a valid account label.
+  - The one $30,000 attack is split into transfers of at most $10,000, so `confirm_above: 10000`
+    never fires.
+- **Deny patterns are wording heuristics.** They added 3 blocks on the generated set and none on
+  the external set, and caused no false positives on either.
+- **Semantic mode is monitor-only.** In condition (d) (`semantic="monitor"`) the IDS did not
+  separate attacks from legitimate requests (ROC AUC 0.48 external, 0.59 generated). Use
+  `semantic="monitor"` to collect data, not to enforce.
+- **Limits.**
+  - The generated set exists for one contract only. Generation for the other three was stopped by
+    a safety classifier and not retried.
+  - Indirect injections were scored as if the attack text were the user's message, an upper
+    bound for deny patterns.
+  - A human-written blind set (`prompts/v3/README.md`) is still outstanding.
+
+### Sealing
+
+A sealed contract carries `contract_hash`, a SHA-256 over the canonical JSON of every other
+field: the rules, the thresholds, `created_at` and, when present, `anchor_embedding` (the
+averaged embedding of the `semantic_anchors`, used by semantic mode). Loading a sealed
+contract recomputes the hash and raises `ContractIntegrityError` if it differs. Loading never
+re-embeds, so a sealed file verifies the same way on every machine.
+
+**Because the hash covers `anchor_embedding`, sealing is not reproducible across machines.**
+The embedding comes from the local `fastembed` model. A different fastembed or onnxruntime
+version, or a different CPU, can change the vector in its last digits, and any change gives a
+different hash. Re-sealing the unchanged `financial_agent` contract on another setup changed
+its embedding by up to 5.7e-5 per dimension, and so changed its hash. Two people sealing the
+same unsealed file will usually get different hashes.
+
+- **Seal once and distribute the sealed file.** `rmic seal contract.json` (or
+  `Guard(path, save_sealed=True)`) writes `anchor_embedding` and `contract_hash` into the
+  file. Commit that file and load it everywhere.
+- **Don't re-seal an unchanged contract.** Re-sealing can change its hash and embedding, and
+  with them every IDS score. When you change a field, re-seal once and redistribute.
+- **In-memory auto-seal hashes are machine-specific.** `Guard("unsealed.json")` and
+  `Guard({...})` seal in memory and emit an `RMICGuardWarning` pointing to `rmic seal`. The
+  in-memory seal doesn't add `created_at` (only sealing that writes the file does). So loading
+  the same unsealed contract again, in the same or another process, gives the same hash as long
+  as the embedding is the same. With `semantic=True` or `"monitor"` the embedding, and with it
+  the hash in `GuardResult` and the audit log, depends on the machine and fastembed version.
+  Don't compare such hashes across machines. Seal the file if audit logs need one stable hash.
+- With `semantic=False` an auto-sealed contract has no `anchor_embedding`, so its hash depends
+  only on the JSON.
+- Already-sealed contracts are unaffected: their `created_at` and hash are stored in the file.
 
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and
@@ -110,7 +289,7 @@ reasoning = GroqReasoning(model_name="groq/llama-3.3-70b-versatile")
 ### CLI
 
 ```bash
-rmic init research-agent        # scaffold a new agent project (contract + quickstart)
+rmic init research-agent        # scaffold a new agent project (sealed contract + quickstart)
 rmic validate contract.json     # check a contract against the schema, no sealing
 rmic seal contract.json         # compute anchor_embedding + contract_hash, write back to the file
 rmic verify contract.json       # check a sealed contract's hash is still intact
@@ -142,21 +321,19 @@ of this repo.
 
 | Path | Contents |
 |---|---|
-| `rmic_guard/` | The SDK shipped as `pip install rmic-guard`. `guard.py` is the high-level `Guard` API; `__init__.py` is the public import surface (LLM reasoning backends load lazily so they don't force a `litellm` install); `cli.py` implements the `rmic` command-line tool. |
+| `rmic_guard/` | The SDK shipped as `pip install rmic-guard`. `guard.py` is the high-level `Guard` API; `__init__.py` is the public import surface (LLM reasoning backends load lazily so they don't force a `litellm` install); `cli.py` implements the `rmic` command-line tool. `examples/` and `schema/` are the bundled copies of the research contracts (plus `financial_agent_hardened`) and of the JSON Schema. |
 | `rmic_guard/_core/` | The enforcement engine (private; import from `rmic_guard` instead): contract loading (`contract_loader.py`), explicit pre-validation (`validation.py`), the SDK exception hierarchy (`exceptions.py`), litellm-free tool-call planning data model (`planning.py`), hard-rule + IDS enforcement (`enforcement_engine.py`), the IDS scoring wrapper (`ids_engine.py`) and its 7 signal implementations (`ids_metric.py`), local embeddings with a pluggable backend (`embedder.py`, `embedding_interface.py`), the signed audit ledger (`audit_ledger.py`), re-anchoring recovery (`recovery_engine.py`), tool dispatch (`tool_layer.py`), LLM reasoning backends (`reasoning_layer.py`), and reproducibility manifests (`integrity_manifest.py`). |
-| `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `rmic_guard/_core/validation.py`'s error messages. |
+| `schema/` | `contract.schema.json` — the formal JSON Schema for the contract format, referenced by `rmic_guard/_core/validation.py`'s error messages (an identical copy ships in `rmic_guard/schema/`). |
 | `rmic_guard/_utils/` | Config loading (`config.py`). The SDK reads a config file only when named explicitly via `RMIC_CONFIG`; the research scripts set it to this repo's `config.yaml`. |
-| `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`) plus a blank `_template_universal.json`. |
-| `prompts/` | The adversarial/legitimate prompt corpus, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`). |
-| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), and IDS threshold-calibration diagnostics (`ids_calibration_investigation/`). |
+| `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`); `examples/` holds `financial_agent_hardened.json` and `template.json`, a minimal contract to start from (see [`contracts/README.md`](contracts/README.md)). |
+| `prompts/` | The v1 adversarial/legitimate prompt corpus used by the experiment, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`); `v2/` is the per-contract corpus with a frozen tune/held-out split (held-out already used), `v3/` the brief for a future blind test set plus its model-generated secondary set (`v3/generated/`); `external/` the v0.4 external evaluation set built from public datasets. |
+| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), and the v0.4 evaluation (`eval_v0.4/`). |
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
-| `ibm_pilot/` | IBM watsonx Orchestrate integration — see below. |
+| `ibm_pilot/` | IBM watsonx Orchestrate integration (adapter, standalone Orchestrate tools, agent YAMLs, `demo.py`, `run_single.py`, tests) — see below. |
 | `examples/` | `quickstart.py` (offline `Guard` PASS/BLOCK), `basic_enforcement.py` (parameter/data-scope rules), `contract_creation.py` (beginner vs. advanced contract API), `identity_drift.py` (semantic IDS scoring). |
-| `tests/` | `pytest` suite covering the `Guard` API, contract creation/validation/integrity, enforcement decisions, audit-log verification, tool registry, and IDS scoring — `pytest tests/`. |
-| `demo.py` | Root-level killer demo for Condition C (middleware-only enforcement). |
-| `preflight_check.py` | No-API-call environment validation. |
-| `seal_contracts.py` | Computes and writes the SHA-256 `contract_hash` (and embedding anchor, where possible) for each file in `contracts/`. |
+| `tests/` | `pytest` suite covering the `Guard` API, contract creation/validation/integrity/sealing, enforcement decisions and hard-rule extensions, audit-log verification, tool registry, IDS scoring, the CLI and `scripts/`; `fixtures/backcompat/` holds the v0.3 decision snapshot — `pytest tests/`. |
+| `scripts/` | `demo.py` (killer demo for Condition C, middleware-only enforcement), `preflight_check.py` (no-API-call environment validation), `seal_contracts.py` (re-seals contracts; refuses the frozen research contracts unless `--force`). |
 | `paper_assets/` | Figures (ROC curves) supporting the write-up referenced below. |
 
 ---
@@ -180,7 +357,7 @@ pip install -r requirements.txt
 
 (On macOS/Linux, activate with `source .venv/bin/activate` instead.)
 
-The research scripts (`experiment/`, `baselines/`, `demo.py`, `preflight_check.py`,
+The research scripts (`experiment/`, `baselines/`, `scripts/`,
 `ibm_pilot/`) point the SDK at this repo's `config.yaml` by setting `RMIC_CONFIG`
 themselves; set it explicitly to use a different config file.
 
@@ -197,7 +374,7 @@ GROQ_API_KEY=your_key_here
 ## Validate
 
 ```powershell
-python preflight_check.py
+python scripts/preflight_check.py
 ```
 
 Runs 7 no-network checks (Python version, `.env`/provider keys, core modules import,
@@ -369,13 +546,16 @@ reordered lines as well as edits (tail truncation needs an externally recorded
 restarts (`audit_key=` / `RMIC_AUDIT_KEY` / `<log>.key`), and the public key is written to
 `<log>.pub` so `AuditLedger.verify_file(<log>)` can check the log later.
 
-Contracts are sealed before use: `seal_contracts.py` computes a SHA-256 hash over each
+Contracts are sealed before use: `scripts/seal_contracts.py` computes a SHA-256 hash over each
 contract's fields (and an embedding anchor, when an embedding backend is available) and
-writes it back into the contract file as `contract_hash` (`seal_contract_file(..., write_back=True)`;
+writes it back into the contract file as `contract_hash` (it refuses to rewrite the four frozen
+research contracts unless `--force` is passed; `seal_contract_file(..., write_back=True)`;
 since v0.3.0 `seal_contract_file()` alone seals in memory only). `load_contract(..., verify_hash=True)`
 (the default) checks this hash at load time; pass `verify_hash=False` to skip it during
 local experimentation. An unsealed file is sealed automatically on load (`auto_seal=True`,
-the default), in memory only unless you also pass `write_back=True`.
+the default), in memory only unless you also pass `write_back=True`. The hash covers
+`anchor_embedding`, which differs between machines and fastembed versions: see
+[Sealing](#sealing) before re-sealing a contract.
 
 On a WARN-level IDS score, `rmic_guard/_core/recovery_engine.py` generates a re-anchoring system
 message and user nudge derived from the contract's sealed `semantic_anchors`, giving the

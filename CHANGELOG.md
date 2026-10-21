@@ -4,6 +4,106 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-21
+
+### Added
+
+- **Contract hard-rule extensions** (all optional, validated at load, covered by the contract
+  hash; contracts without them behave and hash exactly as before):
+  - `argument_rules` per tool: `allowed_args` → `BLOCK argument_not_allowed:<tool>:<arg>`;
+    full-match `patterns` → `BLOCK argument_pattern:<tool>:<arg>` (strings and numbers, lists
+    element-wise, `max_length` cap, regexes ≤ 500 chars compiled at load).
+  - `confirm_above` in `parameter_constraints`: new decision `NEEDS_CONFIRMATION` (tool not
+    executed, `GuardResult.confirmation_id`); `Guard.confirm()` / `EnforcementEngine.confirm()`
+    execute exactly once and log decision `CONFIRMED`; new `ConfirmationNotFoundError`.
+  - `deny_patterns` (opt-in heuristics on the user's message): packs `role_reassignment`,
+    `objective_override`, `guardrail_removal`, `custom` regexes and `prohibited_terms`; action
+    `block` or `warn` (`GuardResult.warnings`); reason `deny_pattern:<pack>:<pattern_id>`.
+- New example contract `financial_agent_hardened` (`contracts/examples/` and bundled):
+  `financial_agent` + `confirm_above: 10000` + account-format argument patterns. Contract hash
+  `1b7e2ad1281b2b100fa219ffd29ca3a1cd67a16ec9886b0a29097ecfd1222904`; `anchor_embedding` is
+  byte-identical to `financial_agent`'s (hash recomputed, anchors not re-embedded).
+- `PlannedToolCall.user_message` (optional): the end user's words, used by `deny_patterns`.
+  `Guard.check()` sets it from `message`, `Guard.run()` from the user message (there
+  `raw_text` is the model's output).
+- `AuditEntry.confirmation_id` (optional, `null` on other entries); `EnforcementOutcome` gains
+  `confirmation_id`, `confirmation_reason` and `warnings`.
+- Pending confirmations expire and are capped. TTL: the contract field
+  `confirmation_ttl_seconds` (covered by the hash) is a ceiling that
+  `Guard(..., confirmation_ttl_seconds=...)` can shorten but not lengthen (a longer value is
+  ignored with an `RMICGuardWarning`); without it the `Guard` argument or 600 s applies. At most
+  100 pending by default (`Guard(..., max_pending_confirmations=...)`; the oldest is evicted).
+  `confirm()` of an expired or evicted id raises `ConfirmationNotFoundError` with `reason`
+  `"expired"` / `"evicted"` (`"cancelled"`, `"unknown"` otherwise) and is audited as `BLOCK`
+  `confirmation_expired` / `confirmation_evicted` with the same `confirmation_id`.
+- `Guard.pending_confirmations()` lists waiting calls (`PendingConfirmation`: id, tool,
+  arguments, reason, `created_at`, `expires_at`); `Guard.cancel(confirmation_id)` withdraws one
+  and audits it as `BLOCK` `confirmation_cancelled`. Engine equivalents:
+  `EnforcementEngine.list_pending_confirmations()` / `.cancel()`.
+- `RMICGuardWarning` (a `UserWarning`): `Guard` emits it when it seals a contract in memory
+  (pointing to `rmic seal`) and when a longer confirmation TTL is ignored.
+- `deny_patterns.max_scan_chars` (default 10,000): only that many leading characters of the user
+  message are scanned; longer messages add the warning `deny_pattern_scan_truncated:<N>`
+  (also on a deny-pattern `BLOCK`, in `GuardResult.warnings` and the audit `failure_reason`).
+- README "Sealing" section: the hash covers `anchor_embedding`, so sealing differs across
+  machines and fastembed versions; seal once and distribute sealed files; in-memory auto-seal
+  hashes are machine-specific.
+
+- `Guard(..., semantic="monitor")`: the IDS is computed and recorded in `GuardResult`
+  (`ids_score`, new `ids_decision` field) and in the audit log (`failure_reason`
+  `monitor:would_<decision>` on a `PASS` entry), but never changes a decision. New
+  `EnforcementMode` `"monitor"` and `EnforcementOutcome.ids_decision`. The default stays
+  `semantic=False`.
+
+### Changed
+
+- `rmic init` seals the scaffolded contract (hash only, offline; `rmic seal` adds the
+  embedding), so the generated quickstart loads a sealed contract without a warning.
+  `examples/quickstart.py` uses the bundled sealed `financial_agent` contract.
+- **In-memory sealing no longer stamps `created_at`** (`load_contract` auto-seal and
+  `seal_contract_file` without `write_back`, `Guard` with a path or dict). Loading the same
+  unsealed contract twice now gives the same hash (previously the current time made every load
+  different). Sealing that writes the file (`rmic seal`, `write_back=True`, `save_sealed=True`)
+  still stamps it; already-sealed files are unaffected.
+- **Contract hashes: no existing contract changed.** `contracts/*.json` and the bundled copies of
+  `financial_agent`, `healthcare_research_agent`, `legal_review_agent` and `support_agent` are
+  byte-identical to v0.3 (the research and IBM-pilot contracts must stay reproducible). The only
+  new hash is `financial_agent_hardened` (above).
+- New decision values `NEEDS_CONFIRMATION` and `CONFIRMED`: code that switches on
+  `outcome.decision` / `result.decision` should handle them (`GuardResult.allowed` is False and
+  True respectively).
+- IDS scoring embeds the scored text once per call (it was embedded once per signal, 7×) and
+  each contract's anchor/topic sets once, reusing them across calls. Scores are bit-identical
+  (3,200/3,200 component values on the bundled contracts); warm calls take ~8 ms instead of
+  ~560–710 ms on the measurement machine (`experiment/perf/ids_latency.md`).
+  `ids_metric.set_ids_embedding_cache(False)` restores the uncached path.
+
+### Fixed
+
+- The topic-embedding cache could return vectors from a previous embedding backend after
+  `set_embedding_backend()`; cache keys now include the backend generation.
+
+### Repository
+
+Not part of the package.
+
+- `demo.py`, `preflight_check.py` and `seal_contracts.py` moved to `scripts/`.
+  `seal_contracts.py` refuses to rewrite the four frozen research contracts unless `--force` is
+  passed.
+- `run_rmic.py` moved to `ibm_pilot/run_single.py`, which no longer writes the contract file.
+- `contracts/_template_universal.json` replaced by `contracts/examples/template.json`, which
+  passes `rmic validate`. This changes the experiment's contract-manifest hash for future runs
+  only.
+- `prompts_v2/` and `prompts_v3/` moved to `prompts/v2/` and `prompts/v3/`. The v1 corpus and its
+  manifest hash are unchanged.
+- Every top-level folder has a README; the Repository Structure table is updated.
+- v0.4 evaluation sets, frozen with SHA-256 hashes:
+  - `prompts/external/`: public datasets, selected and mapped by rules committed before
+    selection;
+  - `prompts/v3/generated/`: model-generated, context-isolated, not human-blind; one contract.
+- One evaluation run on these sets, with no tuning: `experiment/eval_v0.4/` (plan, script,
+  results, raw CSVs).
+
 ## 0.3.0 — 2026-10-21
 
 ### Added

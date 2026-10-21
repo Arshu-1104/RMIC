@@ -72,13 +72,16 @@ from rmic_guard._core.enforcement_engine import (
     EnforcementEngine,
     EnforcementMode,
     EnforcementOutcome,
+    PendingConfirmation,
 )
 from rmic_guard._core.exceptions import (
     ContractIntegrityError,
     ContractNotSealedError,
+    ConfirmationNotFoundError,
     EnforcementConfigError,
     InvalidContractError,
     RMICGuardError,
+    RMICGuardWarning,
     ToolExecutionNotApprovedError,
     ToolNotRegisteredError,
 )
@@ -110,7 +113,7 @@ def __getattr__(name: str):  # PEP 562 lazy attribute access
         return getattr(reasoning_layer, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "__version__",
@@ -139,10 +142,13 @@ __all__ = [
     "ToolNotRegisteredError",
     "ToolExecutionNotApprovedError",
     "EnforcementConfigError",
+    "ConfirmationNotFoundError",
+    "RMICGuardWarning",
     # enforcement
     "EnforcementEngine",
     "EnforcementMode",
     "EnforcementOutcome",
+    "PendingConfirmation",
     # drift detection
     "IDSEngine",
     "set_embedding_backend",

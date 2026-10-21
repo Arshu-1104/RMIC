@@ -60,6 +60,10 @@ call and runs your function **only** if it is allowed.
 > score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
 > catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
 > [calibration report](https://github.com/Arshu-1104/RMIC/blob/main/experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+> To collect IDS data on real traffic without affecting any decision, use
+> `semantic="monitor"`: the IDS is computed and written to `GuardResult` (`ids_score`,
+> `ids_decision` = what `semantic=True` would have decided) and to the audit log, while the
+> hard rules alone decide.
 
 
 | `GuardResult` field | Meaning |
@@ -123,6 +127,44 @@ signing key comes from `audit_key=...`, else `RMIC_AUDIT_KEY`, else
 key is written to `audit.jsonl.pub`, so `AuditLedger.verify_file("audit.jsonl")`
 works after a restart or on another machine.
 
+### Contract hard-rule extensions
+
+Optional contract fields, validated at load and covered by the contract hash:
+
+- `argument_rules`: per-tool `allowed_args` (for fixed-schema tools) and full-match `patterns`
+  for argument values → `BLOCK argument_not_allowed:<tool>:<arg>` / `argument_pattern:<tool>:<arg>`.
+- `confirm_above` in `parameter_constraints`: larger values return `NEEDS_CONFIRMATION`
+  (tool not run); `guard.confirm(result.confirmation_id)` runs it exactly once and logs it.
+  Ids expire after `confirmation_ttl_seconds` (default 600; a contract value is a ceiling the
+  `Guard` can only shorten) and at most 100 can be pending; `guard.pending_confirmations()`
+  lists them and `guard.cancel(id)` withdraws one (audited).
+- `deny_patterns` (opt-in): phrase packs `role_reassignment`, `objective_override`,
+  `guardrail_removal`, your own regexes and `prohibited_terms`, matched against the user's
+  message → `BLOCK deny_pattern:<pack>:<id>` or a warning. **These are heuristics: rewordings
+  evade them.**
+
+See the [README on GitHub](https://github.com/Arshu-1104/RMIC#contract-hard-rule-extensions-v04)
+for examples, and `load_example_contract("financial_agent_hardened")` for a contract using them.
+
+**Evaluation (v0.4).** One run, no tuning, on an external public set (primary: AgentDojo banking,
+InjecAgent, AgentHarm; 80 attacks and 65 legitimate items over 4 contracts) and a
+model-generated, context-isolated set (secondary: 45 attacks and 42 legitimate items, one
+contract).
+- **External set:** attacks blocked 72/80 (90%, 95% CI 81–95) with or without the v0.4
+  extensions. The contracts' tool lists did that work, and they also blocked 56/65 legitimate
+  items whose tools are outside the allowed lists.
+- **Generated set:** deny patterns raised attacks blocked from 37/45 to 40/45 with 0/42
+  legitimate items blocked.
+- Deny patterns are wording heuristics. Semantic mode is monitor-only: the IDS did not separate
+  attacks from legitimate requests (ROC AUC 0.48 and 0.59).
+
+[Full results](https://github.com/Arshu-1104/RMIC/blob/main/experiment/eval_v0.4/results.md).
+
+**Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
+fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the
+sealed file. `Guard` warns when it seals an unsealed contract in memory; such hashes are
+stable across loads but machine-specific in semantic mode.
+
 ## Writing contracts in code
 
 `RMICContract.create(...)` validates the contract, computes its semantic-anchor
@@ -179,7 +221,7 @@ your working directory is ignored.
 ## CLI
 
 ```bash
-rmic init research-agent        # scaffold a new agent project (contract + quickstart)
+rmic init research-agent        # scaffold a new agent project (sealed contract + quickstart)
 rmic validate contract.json     # check a contract against the schema, no sealing
 rmic seal contract.json         # compute anchor_embedding + contract_hash, write back to the file
 rmic verify contract.json       # check a sealed contract's hash is still intact
@@ -199,7 +241,7 @@ legal-review agent roles.
 
 ## Status
 
-This is an early (0.3.x) release from an active research project on
+This is an early (0.4.x) release from an active research project on
 role-boundary preservation in autonomous agents. APIs may change between
 minor versions until 1.0. Issues and contributions welcome on
 [GitHub](https://github.com/Arshu-1104/RMIC).

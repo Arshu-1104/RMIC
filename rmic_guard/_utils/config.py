@@ -7,7 +7,7 @@ v0.2.0 it did, so any unrelated config.yaml in a user's project silently
 changed RMIC thresholds and IDS weights.
 
 The research scripts in this repository (experiment/, baselines/,
-ibm_pilot/, demo.py, preflight_check.py) opt in to the repo's config.yaml by
+ibm_pilot/, scripts/) opt in to the repo's config.yaml by
 setting RMIC_CONFIG before they touch the SDK.
 """
 
