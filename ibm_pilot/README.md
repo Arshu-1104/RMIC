@@ -1,5 +1,7 @@
 # IBM watsonx Orchestrate RMIC-Guard Pilot
 
+RMIC-Guard as a tool for IBM watsonx Orchestrate agents: adapter, standalone tools, agent definitions and demos.
+
 > **Status: this pilot has since been deployed live** to a real watsonx
 > Orchestrate trial instance and verified end-to-end in a live agent
 > conversation. See [`LIVE_DEPLOYMENT.md`](LIVE_DEPLOYMENT.md) for the
