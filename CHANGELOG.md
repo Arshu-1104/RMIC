@@ -2,7 +2,7 @@
 
 All notable changes to `rmic-guard` are documented here.
 
-## Unreleased (v0.4-hardening)
+## Unreleased
 
 ### Added
 
@@ -81,7 +81,7 @@ All notable changes to `rmic-guard` are documented here.
 - The topic-embedding cache could return vectors from a previous embedding backend after
   `set_embedding_backend()`; cache keys now include the backend generation.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-10-21
 
 ### Added
 
