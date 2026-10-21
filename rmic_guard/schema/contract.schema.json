@@ -85,6 +85,14 @@
       "type": "string", "default": "re-anchor",
       "description": "Recovery strategy identifier consumed by core.recovery_engine."
     },
+    "ids_scoring_version": {
+      "type": "integer", "enum": [1, 2], "default": 1,
+      "description": "IDS scoring version. 1 (default) = original scoring: the planned tool name, arguments and message are embedded together and forbidden_topics is empty. 2 = experimental: role distance and semantic grounding use the message alone, and forbidden_topics is the forbidden side of semantic grounding. Omitted from v1 contracts so their contract_hash is unchanged."
+    },
+    "forbidden_topics": {
+      "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [],
+      "description": "Natural-language sentences describing forbidden behaviour, written without negations (e.g. 'Giving personalised investment advice.'). Used only when ids_scoring_version is 2, where at least one is required."
+    },
     "compliance_tags": {
       "type": "array", "items": { "type": "string" }, "default": [],
       "description": "Free-form compliance/regulatory tags, e.g. ['HIPAA', 'SOC2']."

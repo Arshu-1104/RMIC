@@ -171,6 +171,27 @@ def _check_anchor_embedding(problems: list[str], data: Mapping[str, Any]) -> Non
         problems.append("anchor_embedding: present but empty — re-seal the contract")
 
 
+SUPPORTED_IDS_SCORING_VERSIONS: tuple[int, ...] = (1, 2)
+
+
+def _check_ids_scoring(problems: list[str], data: Mapping[str, Any]) -> None:
+    version = data.get("ids_scoring_version", 1)
+    if isinstance(version, bool) or version not in SUPPORTED_IDS_SCORING_VERSIONS:
+        problems.append(
+            f"ids_scoring_version: must be one of {list(SUPPORTED_IDS_SCORING_VERSIONS)}, got {version!r}"
+        )
+        return
+    _check_str_list(problems, data, "forbidden_topics", required=False)
+    topics = data.get("forbidden_topics")
+    if version == 2 and not (isinstance(topics, list) and topics):
+        problems.append(
+            "forbidden_topics: ids_scoring_version 2 needs at least one sentence describing "
+            "forbidden behaviour (it is the forbidden side of semantic grounding)"
+        )
+    if isinstance(topics, list) and any(isinstance(t, str) and not t.strip() for t in topics):
+        problems.append("forbidden_topics: entries must be non-empty sentences")
+
+
 def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None) -> None:
     """Validate a raw contract dict before any embedding/hashing/sealing work.
 
@@ -210,6 +231,7 @@ def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None
         if isinstance(dv, bool) or not isinstance(dv, (int, float)) or dv < 0:
             problems.append("drift_velocity_threshold: must be a non-negative number")
     _check_string(problems, data, "recovery_policy", required=False)
+    _check_ids_scoring(problems, data)
     _check_contract_version(problems, data)
     _check_created_at(problems, data)
     _check_contract_hash(problems, data)

@@ -115,8 +115,32 @@ def _ids_on_plan(
     """
     if not contract.anchor_embedding:
         raise ValueError("contract missing anchor_embedding — run seal_contract_file first")
-    text_for_ids = f"{plan.tool_name} {plan.arguments} {plan.raw_text}"
-    allowed_topics = list(contract.semantic_anchors)
+    text_for_ids, forbidden_topics = ids_text_and_forbidden_topics(contract, plan)
+    components = IDSEngine().score(
+        text_for_ids,
+        anchor_embedding=contract.anchor_embedding,
+        allowed_topics=list(contract.semantic_anchors),
+        forbidden_topics=forbidden_topics,
+        recent_ids=recent_ids,
+        tool_call_history=list(tool_call_history or []) + [plan.tool_name],
+        allowed_actions=tuple(contract.allowed_actions),
+    )
+    return components["base_ids"], components
+
+
+def ids_text_and_forbidden_topics(contract: RMICContract, plan: PlannedToolCall) -> tuple[str, list[str]]:
+    """The text the IDS embeds and the forbidden side of semantic grounding.
+
+    ids_scoring_version 1 (default): "{tool} {arguments} {message}", no
+    forbidden topics. ids_scoring_version 2 (experimental): the message alone
+    -- the tool name and arguments are left to the hard rules -- and the
+    contract's forbidden_topics. A v2 plan with an empty message falls back
+    to the v1 text so the IDS still has something to score.
+    """
+    v1_text = f"{plan.tool_name} {plan.arguments} {plan.raw_text}"
+    if contract.ids_scoring_version == 2:
+        message = (plan.raw_text or "").strip()
+        return (message or v1_text), list(contract.forbidden_topics)
     # TODO: forbidden_topics is intentionally empty. Until 22 Sep 2026 (PR #5)
     # it was filled with contract.data_scope.prohibited + forbidden_actions.
     # This matters for the paper's numbers: semantic_grounding is
@@ -127,18 +151,9 @@ def _ids_on_plan(
     # topics. IDS results produced before 22 Sep are therefore not
     # reproducible with this code: re-run the experiment, or state which
     # version produced the figures, before citing them. Re-populating this
-    # list is a scoring change that needs re-calibration.
-    forbidden_topics: list[str] = []
-    components = IDSEngine().score(
-        text_for_ids,
-        anchor_embedding=contract.anchor_embedding,
-        allowed_topics=allowed_topics,
-        forbidden_topics=forbidden_topics,
-        recent_ids=recent_ids,
-        tool_call_history=list(tool_call_history or []) + [plan.tool_name],
-        allowed_actions=tuple(contract.allowed_actions),
-    )
-    return components["base_ids"], components
+    # list is a scoring change that needs re-calibration (that is what
+    # ids_scoring_version 2 above does, opt-in per contract).
+    return v1_text, []
 
 
 def _velocity(recent_ids: list[float], new_ids: float) -> float:

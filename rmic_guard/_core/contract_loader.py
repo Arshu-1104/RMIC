@@ -108,6 +108,11 @@ class RMICContract:
     created_at: str | None
     contract_hash: str
     anchor_embedding: tuple[float, ...]
+    # Experimental IDS scoring v2 (see enforcement_engine._ids_on_plan). Both
+    # default to the v1 behaviour and are omitted from v1 contract JSON, so
+    # existing contract hashes are unaffected.
+    ids_scoring_version: int = 1
+    forbidden_topics: tuple[str, ...] = ()
 
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
@@ -147,6 +152,10 @@ class RMICContract:
             "created_at": self.created_at,
             "contract_hash": self.contract_hash,
         }
+        if self.ids_scoring_version != 1:
+            d["ids_scoring_version"] = self.ids_scoring_version
+        if self.forbidden_topics:
+            d["forbidden_topics"] = list(self.forbidden_topics)
         if self.anchor_embedding:
             d["anchor_embedding"] = list(self.anchor_embedding)
         return d
@@ -226,6 +235,8 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
         created_at=data.get("created_at"),
         contract_hash=str(stored_hash or compute_contract_hash(data)),
         anchor_embedding=anchor_embedding,
+        ids_scoring_version=int(data.get("ids_scoring_version", 1)),
+        forbidden_topics=_as_tuple_str(data.get("forbidden_topics")),
     )
 
 
@@ -356,6 +367,8 @@ def create_contract(
     recovery_policy: str = "re-anchor",
     compliance_tags: list[str] | None = None,
     contract_version: str = "1.0.0",
+    ids_scoring_version: int = 1,
+    forbidden_topics: list[str] | None = None,
     save_to: str | Path | None = None,
     model_name: str | None = None,
     require_embedding: bool = True,
@@ -376,6 +389,12 @@ def create_contract(
     agents that only need forbidden-tool / parameter / data-scope
     enforcement, or for offline contract authoring before a model is
     available.
+
+    ids_scoring_version / forbidden_topics: EXPERIMENTAL. Version 2 scores
+    role distance and semantic grounding on the message alone and uses
+    forbidden_topics (sentences describing forbidden behaviour, written
+    without negations) as the forbidden side of semantic grounding; it needs
+    at least one forbidden topic. Version 1 (default) is the original scoring.
     """
     from rmic_guard._core.embedder import anchor_centroid_from_anchors
 
@@ -413,6 +432,12 @@ def create_contract(
         "contract_version": contract_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # Only written when non-default, so v1 contracts hash exactly as before.
+    if ids_scoring_version != 1 or isinstance(ids_scoring_version, bool):  # True == 1; let validation reject it
+        data["ids_scoring_version"] = ids_scoring_version
+    if forbidden_topics:
+        data["forbidden_topics"] = list(forbidden_topics)
 
     validate_contract_dict(data, source="RMICContract.create(...)")
 
