@@ -11,6 +11,9 @@
     result = guard.check("transfer_funds", amount=500, to="4321", message="pay rent")
     print(result.allowed, result.decision, result.reason, result.output)
 
+Guard enforces the contract's hard rules by default; semantic identity-drift
+detection (``semantic=True``) is experimental and off by default.
+
 Guard is a thin layer over the existing building blocks (RMICContract,
 ToolRegistry, EnforcementEngine, AuditLedger, the reasoning backends). It
 builds the PlannedToolCall, keeps the per-session IDS / tool-call history the
@@ -322,10 +325,14 @@ class Guard:
             RMICContract. Unsealed contracts are sealed in memory; sealed
             ones are hash-verified (ContractIntegrityError on tampering).
         tools: optional ToolRegistry or ``{name: callable}`` mapping.
-        semantic: True (default) adds semantic identity-drift detection (IDS)
-            on top of the hard rules. The first semantic use downloads the
-            BAAI/bge-small-en-v1.5 embedding model once. False = hard rules
-            only: no embedding model, no network.
+        semantic: False (default) enforces the hard rules only (forbidden
+            tools, parameter bounds, data scope): no embedding model, no
+            network. True adds semantic identity-drift detection (IDS) and
+            downloads the BAAI/bge-small-en-v1.5 embedding model once.
+            EXPERIMENTAL: on the current scoring, attacks do not score higher
+            than legitimate requests (see
+            experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md),
+            so semantic=True blocks legitimate calls without catching attacks.
         audit_log: path of a JSONL audit log; every decision is appended and
             Ed25519-signed.
         audit_key: path of the signing key file (default: RMIC_AUDIT_KEY, else
@@ -339,7 +346,7 @@ class Guard:
         contract: ContractSource,
         *,
         tools: ToolRegistry | Mapping[str, ToolFn] | None = None,
-        semantic: bool = True,
+        semantic: bool = False,
         audit_log: str | os.PathLike | None = None,
         audit_key: str | os.PathLike | None = None,
         save_sealed: bool = False,

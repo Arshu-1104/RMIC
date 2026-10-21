@@ -3,10 +3,11 @@
     pip install rmic-guard
     python examples/quickstart.py
 
-semantic=False enforces the contract's hard rules (forbidden tools, parameter
-bounds, data scope) without an embedding model. Drop it to add semantic
-identity-drift detection (downloads BAAI/bge-small-en-v1.5 once), and see
-guard.run(...) in the README for letting an LLM plan the tool call.
+semantic=False (the default, spelled out below) enforces the contract's hard
+rules (forbidden tools, parameter bounds, data scope) without an embedding
+model. semantic=True adds experimental identity-drift detection (downloads
+BAAI/bge-small-en-v1.5 once); see guard.run(...) in the README for letting an
+LLM plan the tool call.
 """
 
 from rmic_guard import Guard

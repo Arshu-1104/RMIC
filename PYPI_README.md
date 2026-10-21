@@ -51,7 +51,16 @@ print(result.allowed, result.decision, result.reason, result.output)
 `Guard` loads the contract (a file path, a dict, or an `RMICContract`), seals
 it in memory if it isn't sealed yet, and verifies the hash if it is
 (`ContractIntegrityError` on tampering). `guard.check(...)` enforces one tool
-call and runs your function **only** if it is allowed:
+call and runs your function **only** if it is allowed.
+
+> **Semantic mode is experimental and off by default.** `Guard` enforces the
+> contract's hard rules (forbidden tools, parameter bounds, data scope) unless you pass
+> `semantic=True`. On the current scoring, the semantic identity-drift score (IDS) does
+> not separate attacks from legitimate requests: across the 4 bundled contracts, attacks
+> score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
+> catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
+> [calibration report](https://github.com/Arshu-1104/RMIC/blob/main/experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+
 
 | `GuardResult` field | Meaning |
 |---|---|
@@ -72,16 +81,16 @@ and tool-call history is kept for you: `guard.reset()` clears it, and
 guard = Guard({"agent_id": "bot", "role_name": "Bot", "sector": "demo",
                "semantic_anchors": ["I check balances."],
                "allowed_actions": ["check_balance"], "forbidden_actions": ["admin_login"]},
-              semantic=False)
+              semantic=False)   # the default; shown for clarity
 guard.register("check_balance", lambda: {"balance": 100})
 print(guard.check("check_balance"))   # allowed=True, decision=PASS
 print(guard.check("admin_login"))     # allowed=False, decision=BLOCK, reason=forbidden_tool
 ```
 
-`semantic=False` enforces forbidden tools, parameter bounds and data scope
-with no embedding model and no network. With the default `semantic=True`,
-**the first use downloads the `BAAI/bge-small-en-v1.5` embedding model once**
-(then it's cached locally).
+`semantic=False` (the default) enforces forbidden tools, parameter bounds and
+data scope with no embedding model and no network. With the experimental
+`semantic=True`, **the first use downloads the `BAAI/bge-small-en-v1.5`
+embedding model once** (then it's cached locally).
 
 ### Let an LLM plan the call
 
@@ -93,7 +102,7 @@ pip install "rmic-guard[groq]"   # or [anthropic]
 result = guard.run("Transfer $500 to 4321 for rent", llm="groq/llama-3.3-70b-versatile")
 ```
 
-If the plan lands in the IDS warn zone (`NEEDS_RECOVERY`), `run()` re-plans
+With `semantic=True` (experimental), if the plan lands in the IDS warn zone (`NEEDS_RECOVERY`), `run()` re-plans
 once with re-anchoring instructions (`max_recovery=1`) and enforces again; if
 it still isn't allowed, the result is blocked and the tool never runs.
 

@@ -18,10 +18,12 @@ Quickstart (one object, one call):
     # Let an LLM plan the call (pip install "rmic-guard[llm]"):
     result = guard.run("Transfer $500 to 4321 for rent", llm="groq/llama-3.3-70b-versatile")
 
-Guard(..., semantic=False) enforces the hard rules only (forbidden tools,
-parameter bounds, data scope) with no embedding model and no network. With
-semantic=True (default) the first use downloads the BAAI/bge-small-en-v1.5
-embedding model once.
+By default Guard enforces the hard rules only (forbidden tools, parameter
+bounds, data scope) with no embedding model and no network. semantic=True adds
+semantic identity-drift detection; it is EXPERIMENTAL (on the current scoring
+attacks do not score higher than legitimate requests, see
+experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md)
+and its first use downloads the BAAI/bge-small-en-v1.5 embedding model once.
 
 Lower-level API (what Guard is built on, still fully supported):
 

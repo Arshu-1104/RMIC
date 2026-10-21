@@ -61,10 +61,18 @@ and on `NEEDS_RECOVERY` in `run()` re-plans once with re-anchoring instructions.
 log that `guard.verify_log()` checks (each line is hash-chained to the previous one, so
 deleted or reordered lines are detected too).
 
-`Guard(..., semantic=False)` enforces the hard rules only (forbidden tools,
-parameter bounds, data scope) with no embedding model and no network. With the
-default `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1.5`
-embedding model once (cached afterwards).
+> **Semantic mode is experimental and off by default.** `Guard` enforces the
+> contract's hard rules (forbidden tools, parameter bounds, data scope) unless you pass
+> `semantic=True`. On the current scoring, the semantic identity-drift score (IDS) does
+> not separate attacks from legitimate requests: across the 4 bundled contracts, attacks
+> score *lower* than legitimate prompts (ROC AUC 0.35–0.49) and no warn/block threshold
+> catches more than 3 of 25 attacks while flagging at most 1 of 15 legitimate requests. See the
+> [calibration report](experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md). Enable it only for evaluation.
+
+By default (`semantic=False`) no embedding model is loaded and nothing touches the
+network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1.5`
+embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
+comes into play.
 
 Run `python examples/quickstart.py` for a fully offline PASS/BLOCK walkthrough, or see
 `examples/basic_enforcement.py`, `examples/contract_creation.py`, and

@@ -28,10 +28,10 @@ CONTRACT = Path(__file__).resolve().parents[1] / "contracts" / "{agent_name}.jso
 
 
 def main() -> None:
-    # semantic=False runs offline out of the box (hard rules only). Drop it to
-    # add semantic identity-drift scoring too; that downloads a small local
-    # embedding model (BAAI/bge-small-en-v1.5) once, on first use.
-    guard = Guard(CONTRACT, semantic=False)
+    # Hard rules only (the default): runs offline, no embedding model.
+    # semantic=True adds experimental identity-drift scoring and downloads a
+    # small local embedding model (BAAI/bge-small-en-v1.5) once, on first use.
+    guard = Guard(CONTRACT)
     guard.register("example_tool", lambda **kwargs: {{"ok": True, "kwargs": kwargs}})
     guard.register("dangerous_tool", lambda **kwargs: {{"deleted": True}})
 

@@ -68,11 +68,17 @@ class TestContractLoading:
         path = _write(tmp_path / "bot.json", _contract_dict())
         before = path.read_text()
 
-        guard = Guard(path)
+        guard = Guard(path, semantic=True)
 
         assert guard.contract.contract_hash
         assert guard.contract.anchor_embedding  # semantic=True embeds anchors
         assert path.read_text() == before
+
+    def test_default_is_hard_rules_only(self, tmp_path: Path) -> None:
+        guard = Guard(_write(tmp_path / "bot.json", _contract_dict()))
+        assert guard.semantic is False
+        assert guard.contract.anchor_embedding == ()  # no embedding model touched
+        assert guard.check("check_balance").ids_score == 0.0
 
     def test_unsealed_path_hard_rules_only_has_no_embedding(self, tmp_path: Path) -> None:
         path = _write(tmp_path / "bot.json", _contract_dict())
@@ -107,7 +113,7 @@ class TestContractLoading:
     def test_semantic_guard_rejects_contract_without_embedding(self) -> None:
         contract = RMICContract.create(**_contract_dict(), require_embedding=False)
         with pytest.raises(RMICGuardError, match="semantic=False"):
-            Guard(contract)
+            Guard(contract, semantic=True)
 
     def test_save_sealed_requires_a_path(self) -> None:
         with pytest.raises(ValueError):
@@ -187,7 +193,7 @@ class TestCheck:
         assert result.error and "division" in result.error
 
     def test_semantic_check_runs_ids(self) -> None:
-        guard = Guard(_contract_dict())
+        guard = Guard(_contract_dict(), semantic=True)
         guard.register("check_balance", lambda: {"balance": 1})
         result = guard.check("check_balance", message="what is my balance")
         assert result.decision in ("PASS", "PREEMPTIVE_WARN", "NEEDS_RECOVERY", "BLOCK")
@@ -273,7 +279,7 @@ class _EngineSpy:
 class TestSessions:
     def _guard(self) -> Guard:
         # Warn/block at 1.0 so every IDS score passes and the history keeps growing.
-        guard = Guard(_contract_dict(ids_warn_threshold=1.0, ids_block_threshold=1.0))
+        guard = Guard(_contract_dict(ids_warn_threshold=1.0, ids_block_threshold=1.0), semantic=True)
         guard.register("check_balance", lambda: {"balance": 1})
         return guard
 
@@ -338,7 +344,7 @@ def _plan(tool: str = "check_balance", **arguments: Any) -> PlannedToolCall:
 class TestRun:
     def test_needs_recovery_triggers_exactly_one_replan_then_blocks(self) -> None:
         # warn=0.0: every plan lands in the warn zone, so recovery can't succeed.
-        guard = Guard(_contract_dict(ids_warn_threshold=0.0, ids_block_threshold=1.0))
+        guard = Guard(_contract_dict(ids_warn_threshold=0.0, ids_block_threshold=1.0), semantic=True)
         calls: list[str] = []
         guard.register("check_balance", lambda: calls.append("ran"))
         backend = _StubBackend([_plan(), _plan()])
@@ -357,7 +363,7 @@ class TestRun:
         assert calls == []
 
     def test_successful_recovery_executes_the_replanned_tool(self) -> None:
-        guard = Guard(_contract_dict(ids_warn_threshold=1.0, ids_block_threshold=1.0))
+        guard = Guard(_contract_dict(ids_warn_threshold=1.0, ids_block_threshold=1.0), semantic=True)
         guard.register("check_balance", lambda: {"balance": 7})
         real = guard.engine.evaluate_and_maybe_execute
         seen: list[str] = []
@@ -384,7 +390,7 @@ class TestRun:
         assert result.output == {"balance": 7}
 
     def test_max_recovery_zero_blocks_without_replanning(self) -> None:
-        guard = Guard(_contract_dict(ids_warn_threshold=0.0, ids_block_threshold=1.0))
+        guard = Guard(_contract_dict(ids_warn_threshold=0.0, ids_block_threshold=1.0), semantic=True)
         backend = _StubBackend([_plan()])
         result = guard.run("balance?", llm=backend, max_recovery=0)
         assert len(backend.calls) == 1
@@ -540,7 +546,7 @@ class TestNoEmbeddingBackend:
 
     def test_semantic_true_gives_clear_error(self, no_embedding_backend: None) -> None:
         with pytest.raises(RMICGuardError, match=r"semantic=False") as excinfo:
-            Guard(_contract_dict())
+            Guard(_contract_dict(), semantic=True)
         assert "rmic-guard[torch]" in str(excinfo.value)
         assert not isinstance(excinfo.value, ModuleNotFoundError)
 

@@ -26,7 +26,11 @@ All notable changes to `rmic-guard` are documented here.
   - `run()` plans with `ClaudeReasoning` / `GroqReasoning` (lazy import) and, on
     `NEEDS_RECOVERY`, re-plans with the engine's re-anchoring messages (`max_recovery=1`)
     before blocking.
-  - `semantic=False` gives hard-rules-only mode: no embedding model, no network.
+  - Hard-rules-only by default (`semantic=False`): no embedding model, no network.
+    `semantic=True` adds IDS-based identity-drift detection and is **experimental**:
+    on the current scoring attacks score lower than legitimate requests (ROC AUC
+    0.35–0.49 across the bundled contracts; see
+    `experiment/ids_calibration_investigation/post_sep22_threshold_calibration.md`).
   - `audit_log=` / `audit_key=` write every decision to the signed ledger;
     `guard.verify_log()` checks it.
   - `GuardResult` is a frozen dataclass: `allowed`, `decision`, `reason`, `ids_score`,
