@@ -36,7 +36,14 @@ All notable changes to `rmic-guard` are documented here.
   `RMIC_AUDIT_KEY` environment variable, else `<log>.key` (created with 0600 permissions).
   The public key is written to `<log>.pub`. New `AuditLedger.verify_file(path)` and
   `AuditLedger.verify()`.
-- `load_contract(..., auto_seal=True, write_back=False)` seals an unsealed contract on load.
+- The audit log is hash-chained: each line stores `prev_hash`, the SHA-256 of the previous
+  line, inside its signed payload. `verify_file()` therefore detects deleted, inserted and
+  reordered lines as well as edits. `AuditLedger.head_hash(path)` returns the last line's
+  hash; record it externally to detect truncation of the tail. Lines without `prev_hash`
+  (the pre-0.3 format) fail `verify_file()`; `verify_line()` still checks them.
+- `load_contract()` seals unsealed contracts automatically (`auto_seal=True` default,
+  from PR #5). The new `write_back` flag (default `False`) controls whether the sealed
+  contract is written to disk.
 - `rmic_guard` now also exports `AuditLedger`, `AuditEntry` and `set_embedding_backend`.
 - `load_example_contract()` / `list_example_contracts()` for bundled, pre-sealed example
   contracts.
@@ -49,6 +56,15 @@ All notable changes to `rmic-guard` are documented here.
   `from core.planning import PlannedToolCall` (as the 0.2.0 docs showed) must become
   `from rmic_guard import PlannedToolCall`. Every public name is importable from
   `rmic_guard`.
+- **`load_contract()` no longer raises `ContractNotSealedError` for an unsealed file**
+  by default; it seals it (PR #5). Unlike PR #5's version, sealing on load happens in
+  memory only, unless `write_back=True` is passed. Pass `auto_seal=False` for the 0.2.0
+  behaviour.
+- **IDS scores changed (PR #5, 22 Sep 2026).** `forbidden_topics` passed to the IDS is
+  now empty (it used to hold the contract's prohibited data categories and forbidden tool
+  names). This lowers `semantic_grounding`, and therefore Base IDS, for practically every
+  input, and changes the parallel statistical signals. IDS numbers produced before that
+  change are not reproducible with this release.
 - **`seal_contract_file()` no longer rewrites the file by default.** `write_back` now
   defaults to `False`: the sealed contract is returned in memory and the file on disk is
   untouched. Pass `write_back=True` (or run `rmic seal <file>`) to persist it. Guard writes

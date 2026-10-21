@@ -102,10 +102,13 @@ it still isn't allowed, the result is blocked and the tool never runs.
 ```python
 guard = Guard("contracts/bank_bot.json", audit_log="audit.jsonl")
 ...
-guard.verify_log()   # True unless an entry was edited
+guard.verify_log()   # False if any entry was edited, deleted, inserted or reordered
 ```
 
-Every decision is appended to `audit.jsonl` with an Ed25519 signature. The
+Every decision is appended to `audit.jsonl` with an Ed25519 signature, and
+each line stores the SHA-256 of the line before it, so deleted or reordered
+lines break the chain. (Cutting lines off the *end* leaves a shorter valid
+chain: record `AuditLedger.head_hash("audit.jsonl")` elsewhere to detect that.) The
 signing key comes from `audit_key=...`, else `RMIC_AUDIT_KEY`, else
 `audit.jsonl.key` (created with 0600 permissions on first use). The public
 key is written to `audit.jsonl.pub`, so `AuditLedger.verify_file("audit.jsonl")`

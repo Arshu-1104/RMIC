@@ -58,7 +58,8 @@ keeps per-session IDS / tool-call history for you (`guard.reset()`,
 `guard.session("user-42")`), executes the tool only on `PASS` / `PREEMPTIVE_WARN`,
 and on `NEEDS_RECOVERY` in `run()` re-plans once with re-anchoring instructions.
 `Guard(..., audit_log="audit.jsonl")` writes every decision to an Ed25519-signed
-log that `guard.verify_log()` checks.
+log that `guard.verify_log()` checks (each line is hash-chained to the previous one, so
+deleted or reordered lines are detected too).
 
 `Guard(..., semantic=False)` enforces the hard rules only (forbidden tools,
 parameter bounds, data scope) with no embedding model and no network. With the
@@ -353,7 +354,10 @@ distinct from the per-call Base IDS drift score above.
 
 Every enforcement decision can be recorded to an append-only, Ed25519-signed JSONL
 ledger (`rmic_guard/_core/audit_ledger.py`), giving each entry a tamper-evident signature over its
-timestamp, agent ID, IDS score, drift type, and decision. The signing key persists across
+timestamp, agent ID, IDS score, drift type, and decision. Each line also stores the SHA-256 of
+the previous line inside its signed payload, so `verify_file()` detects deleted, inserted and
+reordered lines as well as edits (tail truncation needs an externally recorded
+`AuditLedger.head_hash()`). The signing key persists across
 restarts (`audit_key=` / `RMIC_AUDIT_KEY` / `<log>.key`), and the public key is written to
 `<log>.pub` so `AuditLedger.verify_file(<log>)` can check the log later.
 
@@ -362,7 +366,8 @@ contract's fields (and an embedding anchor, when an embedding backend is availab
 writes it back into the contract file as `contract_hash` (`seal_contract_file(..., write_back=True)`;
 since v0.3.0 `seal_contract_file()` alone seals in memory only). `load_contract(..., verify_hash=True)`
 (the default) checks this hash at load time; pass `verify_hash=False` to skip it during
-local experimentation.
+local experimentation. An unsealed file is sealed automatically on load (`auto_seal=True`,
+the default), in memory only unless you also pass `write_back=True`.
 
 On a WARN-level IDS score, `rmic_guard/_core/recovery_engine.py` generates a re-anchoring system
 message and user nudge derived from the contract's sealed `semantic_anchors`, giving the

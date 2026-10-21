@@ -1,4 +1,8 @@
-"""Append-only audit ledger with per-entry Ed25519 signatures.
+"""Append-only audit ledger with per-entry Ed25519 signatures and a hash chain.
+
+Each line stores the SHA-256 of the line before it (``prev_hash``) inside
+its signed payload, so verify_file() detects edited, deleted, inserted and
+reordered lines, not only forged ones.
 
 The signing key is persistent so a log can be verified after a restart:
 
@@ -54,6 +58,20 @@ class AuditEntry:
     false_negative: bool = False
 
 
+GENESIS_HASH = "0" * 64
+
+
+def line_hash(line: str) -> str:
+    """SHA-256 of one log line, ignoring its trailing newline / CRLF."""
+    return sha256(line.rstrip("\r\n").encode("utf-8")).hexdigest()
+
+
+def _signed_payload(entry: Mapping[str, Any], prev_hash: str) -> bytes:
+    return json.dumps(
+        {"entry": entry, "prev_hash": prev_hash}, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
 def _sidecar(path: Path, suffix: str) -> Path:
     return path.with_name(path.name + suffix)
 
@@ -87,8 +105,9 @@ def _public_pem(public_key: Ed25519PublicKey) -> bytes:
 
 class AuditLedger:
     """
-    Append-only JSONL ledger. Each line is a JSON object:
-    { "entry": {...}, "signature": "<base64>" }
+    Append-only, hash-chained JSONL ledger. Each line is a JSON object:
+    { "entry": {...}, "prev_hash": "<sha256 hex of previous line>", "signature": "<base64>" }
+    The signature covers entry + prev_hash; the first line's prev_hash is GENESIS_HASH.
     """
 
     def __init__(
@@ -137,12 +156,30 @@ class AuditLedger:
             format=serialization.PublicFormat.Raw,
         )
 
+    def _last_line_hash(self) -> str:
+        """Hash of the last non-empty line already in the log (GENESIS_HASH if none)."""
+        if not self.path.is_file():
+            return GENESIS_HASH
+        last = ""
+        with self.path.open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    last = line
+        return line_hash(last) if last else GENESIS_HASH
+
     def append(self, entry: AuditEntry) -> None:
-        payload = json.dumps(asdict(entry), sort_keys=True, separators=(",", ":")).encode("utf-8")
-        sig = self._private_key.sign(payload)
+        """Sign and append ``entry``, chained to the previous line via prev_hash.
+
+        The chain is read from the file on every append, so a fresh process
+        (or a second AuditLedger on the same path) continues it correctly.
+        Concurrent writers to one log file are not supported.
+        """
+        prev_hash = self._last_line_hash()
+        sig = self._private_key.sign(_signed_payload(asdict(entry), prev_hash))
         line = json.dumps(
             {
                 "entry": asdict(entry),
+                "prev_hash": prev_hash,
                 "signature": base64.b64encode(sig).decode("ascii"),
             },
             separators=(",", ":"),
@@ -157,10 +194,13 @@ class AuditLedger:
 
     @staticmethod
     def verify_line(line: str, public_key: Ed25519PublicKey) -> bool:
+        """Check one line's signature (chained or pre-chaining format)."""
         obj = json.loads(line)
-        entry = obj["entry"]
         sig = base64.b64decode(obj["signature"])
-        payload = json.dumps(entry, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if "prev_hash" in obj:
+            payload = _signed_payload(obj["entry"], obj["prev_hash"])
+        else:  # lines written before hash chaining: signature over the entry only
+            payload = json.dumps(obj["entry"], sort_keys=True, separators=(",", ":")).encode("utf-8")
         try:
             public_key.verify(sig, payload)
         except Exception:
@@ -169,11 +209,16 @@ class AuditLedger:
 
     @staticmethod
     def verify_file(path: str | Path, public_key: Ed25519PublicKey | None = None) -> bool:
-        """Return True iff every line of the log at ``path`` carries a valid signature.
+        """Return True iff the log at ``path`` is intact.
 
-        The public key defaults to the ``<log>.pub`` file written alongside the
-        log. Malformed lines count as failures. Note that signatures are
-        per-entry: this detects edited or forged entries, not deleted ones.
+        Every line must carry a valid signature AND a prev_hash equal to the
+        SHA-256 of the line before it (GENESIS_HASH for the first line), so
+        edited, forged, deleted, inserted and reordered lines are all
+        detected. Removing lines from the *end* of the log leaves a valid
+        shorter chain; to detect that, record ``AuditLedger.head_hash(path)``
+        somewhere outside the log and compare. The public key defaults to the
+        ``<log>.pub`` file written alongside the log. Malformed lines and
+        lines without a prev_hash count as failures.
         """
         log_path = Path(path)
         if public_key is None:
@@ -184,16 +229,30 @@ class AuditLedger:
             public_key = loaded
         if not log_path.is_file():
             return False
+        expected_prev = GENESIS_HASH
         with log_path.open(encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
                 try:
+                    if json.loads(line).get("prev_hash") != expected_prev:
+                        return False
                     if not AuditLedger.verify_line(line, public_key):
                         return False
-                except (ValueError, KeyError, TypeError):
+                except (ValueError, KeyError, TypeError, AttributeError):
                     return False
+                expected_prev = line_hash(line)
         return True
+
+    @staticmethod
+    def head_hash(path: str | Path) -> str:
+        """Hash of the log's last line: store it externally to detect tail truncation."""
+        last = ""
+        with Path(path).open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    last = line
+        return line_hash(last) if last else GENESIS_HASH
 
 
 def hash_text(text: str) -> str:

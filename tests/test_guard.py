@@ -433,6 +433,60 @@ class TestAudit:
         assert guard2.verify_log() is False
         assert AuditLedger.verify_file(log) is False
 
+    def _chained_log(self, tmp_path: Path, n: int = 4) -> Path:
+        log = tmp_path / "chain.jsonl"
+        guard = Guard(_contract_dict(), semantic=False, audit_log=log)
+        for i in range(n):
+            guard.check("admin_login", message=f"attempt {i}")
+        return log
+
+    def test_lines_are_hash_chained_across_restarts(self, tmp_path: Path) -> None:
+        from rmic_guard._core.audit_ledger import GENESIS_HASH, line_hash
+
+        log = self._chained_log(tmp_path, n=2)
+        Guard(_contract_dict(), semantic=False, audit_log=log).check("admin_login")  # new process
+        lines = log.read_text().splitlines()
+        assert json.loads(lines[0])["prev_hash"] == GENESIS_HASH
+        for prev, cur in zip(lines, lines[1:]):
+            assert json.loads(cur)["prev_hash"] == line_hash(prev)
+        assert AuditLedger.verify_file(log) is True
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(lambda ls: ls[:1] + ls[2:], id="delete-middle-line"),
+            pytest.param(lambda ls: ls[1:], id="delete-first-line"),
+            pytest.param(lambda ls: [ls[0], ls[2], ls[1], ls[3]], id="swap-two-lines"),
+            pytest.param(lambda ls: ls[:2] + [ls[1]] + ls[2:], id="duplicate-a-line"),
+        ],
+    )
+    def test_deleted_reordered_or_inserted_lines_are_detected(self, tmp_path: Path, mutate: Any) -> None:
+        log = self._chained_log(tmp_path)
+        lines = log.read_text().splitlines()
+        # Every line still carries a valid signature on its own...
+        public_key = AuditLedger(log).public_key
+        assert all(AuditLedger.verify_line(line, public_key) for line in mutate(lines))
+
+        log.write_text("\n".join(mutate(lines)) + "\n")
+        # ...but the chain no longer links up.
+        assert AuditLedger.verify_file(log) is False
+
+    def test_tail_truncation_is_detected_with_recorded_head_hash(self, tmp_path: Path) -> None:
+        log = self._chained_log(tmp_path)
+        head = AuditLedger.head_hash(log)
+        lines = log.read_text().splitlines()
+        log.write_text("\n".join(lines[:-1]) + "\n")
+
+        assert AuditLedger.verify_file(log) is True  # a shorter chain is still a valid chain
+        assert AuditLedger.head_hash(log) != head  # ...which the recorded head hash exposes
+
+    def test_unchained_line_fails_verify_file(self, tmp_path: Path) -> None:
+        log = self._chained_log(tmp_path, n=1)
+        obj = json.loads(log.read_text())
+        del obj["prev_hash"]
+        log.write_text(json.dumps(obj) + "\n")
+        assert AuditLedger.verify_file(log) is False
+
     def test_default_key_file_is_created_next_to_log_and_reused(self, tmp_path: Path) -> None:
         log = tmp_path / "logs" / "audit.jsonl"
         first = AuditLedger(log)
