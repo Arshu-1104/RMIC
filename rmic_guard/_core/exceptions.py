@@ -15,6 +15,7 @@ __all__ = [
     "ToolNotRegisteredError",
     "ToolExecutionNotApprovedError",
     "EnforcementConfigError",
+    "ConfirmationNotFoundError",
 ]
 
 
@@ -65,3 +66,8 @@ class ToolExecutionNotApprovedError(RMICGuardError):
 
 class EnforcementConfigError(RMICGuardError):
     """Raised for invalid EnforcementEngine configuration (e.g. bad thresholds)."""
+
+
+class ConfirmationNotFoundError(RMICGuardError):
+    """Raised by confirm() for a confirmation id that was never issued, was
+    already used (ids are single-use) or belongs to another engine."""

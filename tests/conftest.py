@@ -35,3 +35,11 @@ def _deterministic_embeddings() -> None:
     set_embedding_backend(_char_ngram_embed)
     yield
     set_embedding_backend(None)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Research modules (e.g. ibm_pilot.config, imported when its tests run in
+    the same pytest process) set RMIC_CONFIG to the repo config.yaml, whose
+    thresholds then override every contract's. SDK tests must not inherit it."""
+    monkeypatch.delenv("RMIC_CONFIG", raising=False)

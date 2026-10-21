@@ -25,6 +25,10 @@ class PlannedToolCall:
     arguments: dict[str, Any]
     raw_text: str
     data_categories_accessed: tuple[str, ...] = ()
+    # The end user's message, when known. Contract deny_patterns are matched
+    # against it (falling back to raw_text when None). Guard.run() sets it:
+    # there raw_text is the model's output, not the user's words.
+    user_message: str | None = None
 
 
 def parse_planned_json(text: str) -> PlannedToolCall:

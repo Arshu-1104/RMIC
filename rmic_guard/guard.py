@@ -25,6 +25,7 @@ signed audit log, and runs the re-anchoring recovery loop for LLM plans.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import threading
 from dataclasses import dataclass, field
@@ -50,7 +51,7 @@ ToolFn = Callable[..., Any]
 SemanticMode = Union[bool, Literal["monitor"]]
 _ENFORCEMENT_MODES = {False: "hard_rules_only", True: "full", "monitor": "monitor"}
 
-_ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN"})
+_ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN", "CONFIRMED"})
 # Bounded so a long-lived session can't grow without limit; the IDS
 # trajectory and tool-frequency signals only look at a recent window anyway.
 _HISTORY_LIMIT = 100
@@ -73,6 +74,10 @@ class GuardResult:
     error: str | None = None
     # semantic="monitor" only: what semantic enforcement would have decided.
     ids_decision: str | None = None
+    # NEEDS_CONFIRMATION: pass to guard.confirm() to execute the call (single use).
+    confirmation_id: str | None = None
+    # Contract deny_patterns with action "warn" that matched; the call proceeded.
+    warnings: tuple[str, ...] = ()
     outcome: EnforcementOutcome | None = field(default=None, repr=False, compare=False)
 
     def __repr__(self) -> str:
@@ -84,6 +89,10 @@ class GuardResult:
             parts.append(f"output={self.output!r}")
         if self.ids_decision is not None:
             parts.append(f"ids_decision={self.ids_decision}")
+        if self.confirmation_id is not None:
+            parts.append(f"confirmation_id={self.confirmation_id!r}")
+        if self.warnings:
+            parts.append(f"warnings={list(self.warnings)}")
         if self.error:
             parts.append(f"error={self.error!r}")
         if self.recovery_attempted:
@@ -96,6 +105,8 @@ class GuardResult:
 def _reason_for(outcome: EnforcementOutcome) -> str | None:
     if outcome.hard_rule_violation:
         return outcome.hard_rule_violation
+    if outcome.decision == "NEEDS_CONFIRMATION":
+        return outcome.confirmation_reason
     if outcome.decision == "BLOCK":
         return "ids_block_threshold_exceeded"
     if outcome.decision == "NEEDS_RECOVERY":
@@ -241,6 +252,7 @@ class GuardSession:
             arguments=args,
             raw_text=message or "",
             data_categories_accessed=_as_categories(data),
+            user_message=message or "",
         )
         return self._enforce(plan)
 
@@ -254,7 +266,7 @@ class GuardSession:
         backend = self._guard._backend_for(llm)
         contract = self._guard.contract
         plan = backend.plan_tool_call(user_message, contract=contract, condition="C")
-        result = self._enforce(plan)
+        result = self._enforce(dataclasses.replace(plan, user_message=user_message))
 
         attempts = 0
         while result.decision == "NEEDS_RECOVERY" and attempts < max_recovery:
@@ -267,7 +279,7 @@ class GuardSession:
                 condition="C",
                 extra_system=outcome.recovery_system_message if outcome else None,
             )
-            result = self._enforce(plan, recovery_attempted=True)
+            result = self._enforce(dataclasses.replace(plan, user_message=user_message), recovery_attempted=True)
 
         if result.decision == "NEEDS_RECOVERY":
             # Recovery budget exhausted (or max_recovery=0): never let a
@@ -322,6 +334,8 @@ class GuardSession:
             executed=tool_result is not None and tool_result.ok,
             error=tool_result.error if tool_result is not None and not tool_result.ok else None,
             ids_decision=outcome.ids_decision,
+            confirmation_id=outcome.confirmation_id if outcome.decision == "NEEDS_CONFIRMATION" else None,
+            warnings=outcome.warnings,
             outcome=outcome,
         )
 
@@ -454,6 +468,29 @@ class Guard:
     def run(self, user_message: str, *, llm: Any, max_recovery: int = 1) -> GuardResult:
         """Plan with an LLM and enforce, in the default session. See GuardSession.run."""
         return self._default.run(user_message, llm=llm, max_recovery=max_recovery)
+
+    def confirm(self, confirmation_id: str) -> GuardResult:
+        """Execute a call that returned NEEDS_CONFIRMATION (e.g. an amount above
+        the contract's confirm_above). Executes exactly once: the id is consumed
+        and a second confirm() -- or an unknown id -- raises
+        ConfirmationNotFoundError. The confirmation is written to the audit log."""
+        pending_plan = self.engine.pending_plan(confirmation_id)
+        execute = pending_plan is not None and self.tools.has(pending_plan.tool_name)
+        outcome = self.engine.confirm(confirmation_id, execute_tool=execute)
+        tool_result = outcome.tool_result
+        return GuardResult(
+            allowed=outcome.decision in _ALLOWED_DECISIONS,
+            decision=outcome.decision,
+            reason=outcome.hard_rule_violation,
+            ids_score=0.0,
+            output=tool_result.data if tool_result is not None and tool_result.ok else None,
+            contract_hash=self.contract.contract_hash,
+            tool_name=pending_plan.tool_name if pending_plan is not None else "",
+            executed=tool_result is not None and tool_result.ok,
+            error=tool_result.error if tool_result is not None and not tool_result.ok else None,
+            confirmation_id=confirmation_id,
+            outcome=outcome,
+        )
 
     def _backend_for(self, llm: Any) -> Any:
         if not isinstance(llm, str):

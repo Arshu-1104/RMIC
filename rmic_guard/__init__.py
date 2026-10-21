@@ -76,6 +76,7 @@ from rmic_guard._core.enforcement_engine import (
 from rmic_guard._core.exceptions import (
     ContractIntegrityError,
     ContractNotSealedError,
+    ConfirmationNotFoundError,
     EnforcementConfigError,
     InvalidContractError,
     RMICGuardError,
@@ -139,6 +140,7 @@ __all__ = [
     "ToolNotRegisteredError",
     "ToolExecutionNotApprovedError",
     "EnforcementConfigError",
+    "ConfirmationNotFoundError",
     # enforcement
     "EnforcementEngine",
     "EnforcementMode",

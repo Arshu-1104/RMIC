@@ -1,18 +1,25 @@
 """
 Dual enforcement between reasoning output and tool execution.
 
-Pass 1: hard rules (forbidden tools, parameter bounds, data scope).
+Pass 1: hard rules (forbidden tools, argument rules, parameter bounds, data
+        scope, contract deny patterns).
 Pass 2: IDS composite; block only when IDS >= block threshold.
+Before a tool executes: contract confirm_above limits turn the call into
+NEEDS_CONFIRMATION; confirm(confirmation_id) executes it exactly once.
 """
 
 from __future__ import annotations
 
+import secrets
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
 
 from rmic_guard._core.audit_ledger import AuditEntry, AuditLedger, hash_text
 from rmic_guard._core.contract_loader import RMICContract
+from rmic_guard._core.exceptions import ConfirmationNotFoundError
+from rmic_guard._core.hard_rules import check_argument_rules, confirmation_reason, deny_pattern_matches
 from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
 from rmic_guard._core.planning import PlannedToolCall
@@ -21,7 +28,9 @@ from rmic_guard._utils.config import load_user_config
 
 __all__ = ["EnforcementEngine", "EnforcementMode", "EnforcementOutcome"]
 
-Decision = Literal["PASS", "BLOCK", "WARN", "NEEDS_RECOVERY", "PREEMPTIVE_WARN"]
+Decision = Literal[
+    "PASS", "BLOCK", "WARN", "NEEDS_RECOVERY", "PREEMPTIVE_WARN", "NEEDS_CONFIRMATION", "CONFIRMED"
+]
 
 EnforcementMode = Literal["full", "hard_rules_only", "ids_only", "monitor"]
 
@@ -39,6 +48,12 @@ class EnforcementOutcome:
     # "monitor" mode only: what "full" mode would have decided from the IDS
     # (PASS / PREEMPTIVE_WARN / NEEDS_RECOVERY / BLOCK). None in other modes.
     ids_decision: str | None = None
+    # NEEDS_CONFIRMATION / CONFIRMED: the single-use id for confirm(), and why
+    # confirmation is needed ("confirm_above:<param>").
+    confirmation_id: str | None = None
+    confirmation_reason: str | None = None
+    # Contract deny_patterns with action "warn" that matched (the call proceeds).
+    warnings: tuple[str, ...] = ()
 
 
 def _numeric_for_type(val: Any, value_type: str) -> float:
@@ -88,10 +103,27 @@ def _check_hard_rules(contract: RMICContract, plan: PlannedToolCall) -> str | No
         return "forbidden_tool"
     if allowed_norm and planned not in allowed_norm:
         return "tool_not_allowed"
+    ar = check_argument_rules(contract.argument_rules, plan.tool_name, plan.arguments)
+    if ar:
+        return ar
     pr = _check_parameter_constraints(contract, plan.arguments)
     if pr:
         return pr
-    return _check_data_scope(contract, plan)
+    ds = _check_data_scope(contract, plan)
+    if ds:
+        return ds
+    blocked, _ = deny_pattern_matches(contract.deny_patterns, _deny_text(plan))
+    return blocked
+
+
+def _deny_text(plan: PlannedToolCall) -> str:
+    """Deny patterns look at the user's words only, never the model's output."""
+    return plan.user_message if plan.user_message is not None else plan.raw_text
+
+
+def _join_reasons(*reasons: str | None) -> str | None:
+    parts = [r for r in reasons if r]
+    return ";".join(parts) if parts else None
 
 
 def _ids_on_plan(
@@ -163,6 +195,9 @@ class EnforcementEngine:
         self.ledger = ledger
         self.log_async = log_async
         self._tool_approval_token = tools.issue_approval_token()
+        # confirmation_id -> plan awaiting confirm(); each id is removed on use.
+        self._pending_confirmations: dict[str, PlannedToolCall] = {}
+        self._pending_lock = threading.Lock()
         # The contract's own thresholds are authoritative. A config file only
         # overrides them when one was named explicitly (path / RMIC_CONFIG) and
         # actually sets the key -- built-in defaults never mask contract values.
@@ -182,6 +217,81 @@ class EnforcementEngine:
             self.log_async(entry)
         else:
             self.ledger.append(entry)
+
+    def _pre_execution_gate(
+        self, plan: PlannedToolCall, enforcement_mode: EnforcementMode
+    ) -> tuple[str | None, str | None, tuple[str, ...]]:
+        """For a plan that passed every blocking check: (confirmation reason,
+        confirmation id, deny-pattern warnings). A confirmation reason means the
+        tool must not run now; the plan is parked under the returned id."""
+        if enforcement_mode == "ids_only":  # hard rules (and these extensions) are skipped
+            return None, None, ()
+        _, warnings = deny_pattern_matches(self.contract.deny_patterns, _deny_text(plan))
+        reason = confirmation_reason(self.contract.parameter_constraints, plan.arguments)
+        if reason is None:
+            return None, None, warnings
+        confirmation_id = secrets.token_urlsafe(16)
+        with self._pending_lock:
+            self._pending_confirmations[confirmation_id] = plan
+        return reason, confirmation_id, warnings
+
+    @property
+    def pending_confirmations(self) -> int:
+        """Number of NEEDS_CONFIRMATION calls not yet confirmed."""
+        with self._pending_lock:
+            return len(self._pending_confirmations)
+
+    def pending_plan(self, confirmation_id: str) -> PlannedToolCall | None:
+        """The call waiting under confirmation_id (None if unknown or already used)."""
+        with self._pending_lock:
+            return self._pending_confirmations.get(confirmation_id)
+
+    def confirm(self, confirmation_id: str, *, execute_tool: bool = True) -> EnforcementOutcome:
+        """Execute a call that returned NEEDS_CONFIRMATION. Single use: the id
+        is consumed before anything runs, so a second confirm() raises
+        ConfirmationNotFoundError. Hard rules are re-checked; the confirmation
+        is written to the audit log (decision CONFIRMED, same confirmation_id
+        as the NEEDS_CONFIRMATION entry)."""
+        with self._pending_lock:
+            plan = self._pending_confirmations.pop(confirmation_id, None)
+        if plan is None:
+            raise ConfirmationNotFoundError(
+                f"No pending confirmation {confirmation_id!r}: it was never issued by this engine "
+                "or has already been used."
+            )
+        c = self.contract
+        hard = _check_hard_rules(c, plan)  # contracts are immutable; defensive only
+        decision: Decision = "BLOCK" if hard else "CONFIRMED"
+        self._log(
+            AuditEntry(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent_id=c.agent_id,
+                input_hash=hash_text(plan.raw_text),
+                ids_score=0.0,
+                drift_type=None,
+                drift_velocity=None,
+                decision=decision,
+                failure_reason=hard,
+                contract_hash=c.contract_hash,
+                recovery_attempted=False,
+                confirmation_id=confirmation_id,
+            ),
+            sync=True,
+        )
+        tool_result: ToolResult | None = None
+        if not hard and execute_tool:
+            tool_result = self.tools.execute(plan.tool_name, approval_token=self._tool_approval_token, **plan.arguments)
+        return EnforcementOutcome(
+            decision=decision,
+            ids_score=0.0,
+            drift_velocity=0.0,
+            ids_components=None,
+            hard_rule_violation=hard,
+            recovery_system_message=None,
+            recovery_user_message=None,
+            tool_result=tool_result,
+            confirmation_id=confirmation_id,
+        )
 
     def evaluate_and_maybe_execute(
         self,
@@ -204,6 +314,11 @@ class EnforcementEngine:
           monitor — hard rules decide; the IDS is computed and recorded (outcome,
             audit log) but never changes the decision. outcome.ids_decision holds
             what "full" would have decided.
+
+        In every mode except ids_only, a call that would execute but has an
+        argument above a contract confirm_above limit returns NEEDS_CONFIRMATION
+        instead (tool not run; see confirm()), and deny_patterns with action
+        "warn" are reported in outcome.warnings.
         """
         c = self.contract
         if enforcement_mode == "ids_only":
@@ -269,8 +384,11 @@ class EnforcementEngine:
                 tool_result=None,
             )
 
+        gate_reason, confirmation_id, warnings = self._pre_execution_gate(plan, enforcement_mode)
+
         if enforcement_mode == "hard_rules_only":
-            pass_sync = self.log_async is None
+            pass_sync = self.log_async is None or gate_reason is not None
+            hr_decision: Decision = "NEEDS_CONFIRMATION" if gate_reason else "PASS"
             self._log(
                 AuditEntry(
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -279,24 +397,25 @@ class EnforcementEngine:
                     ids_score=0.0,
                     drift_type=drift_type,
                     drift_velocity=None,
-                    decision="PASS",
-                    failure_reason=None,
+                    decision=hr_decision,
+                    failure_reason=_join_reasons(gate_reason, *warnings),
                     false_positive=False,
                     false_negative=False,
                     contract_hash=c.contract_hash,
                     recovery_attempted=False,
+                    confirmation_id=confirmation_id,
                 ),
                 sync=pass_sync,
             )
             tool_result: ToolResult | None = None
-            if execute_tool:
+            if execute_tool and gate_reason is None:
                 tool_result = self.tools.execute(
                     plan.tool_name,
                     approval_token=self._tool_approval_token,
                     **plan.arguments,
                 )
             return EnforcementOutcome(
-                decision="PASS",
+                decision=hr_decision,
                 ids_score=0.0,
                 drift_velocity=0.0,
                 ids_components=None,
@@ -304,6 +423,9 @@ class EnforcementEngine:
                 recovery_system_message=None,
                 recovery_user_message=None,
                 tool_result=tool_result,
+                confirmation_id=confirmation_id,
+                confirmation_reason=gate_reason,
+                warnings=warnings,
             )
 
         ids_score, ids_components = _ids_on_plan(
@@ -315,7 +437,12 @@ class EnforcementEngine:
         vel = _velocity(recent_ids, ids_score)
 
         def audit(
-            decision: str, recovery_attempted: bool, *, sync_log: bool, failure_reason: str | None = None
+            decision: str,
+            recovery_attempted: bool,
+            *,
+            sync_log: bool,
+            failure_reason: str | None = None,
+            confirmation_id: str | None = None,
         ) -> None:
             self._log(
                 AuditEntry(
@@ -338,6 +465,7 @@ class EnforcementEngine:
                     false_negative=False,
                     contract_hash=c.contract_hash,
                     recovery_attempted=recovery_attempted,
+                    confirmation_id=confirmation_id,
                 ),
                 sync=sync_log,
             )
@@ -354,21 +482,25 @@ class EnforcementEngine:
                 shadow = "PREEMPTIVE_WARN"
             else:
                 shadow = "PASS"
+            monitor_decision: Decision = "NEEDS_CONFIRMATION" if gate_reason else "PASS"
             audit(
-                "PASS",
+                monitor_decision,
                 False,
-                sync_log=self.log_async is None or shadow != "PASS",
-                failure_reason=None if shadow == "PASS" else f"monitor:would_{shadow.lower()}",
+                sync_log=self.log_async is None or shadow != "PASS" or gate_reason is not None,
+                failure_reason=_join_reasons(
+                    gate_reason, None if shadow == "PASS" else f"monitor:would_{shadow.lower()}", *warnings
+                ),
+                confirmation_id=confirmation_id,
             )
             monitored_result: ToolResult | None = None
-            if execute_tool:
+            if execute_tool and gate_reason is None:
                 monitored_result = self.tools.execute(
                     plan.tool_name,
                     approval_token=self._tool_approval_token,
                     **plan.arguments,
                 )
             return EnforcementOutcome(
-                decision="PASS",
+                decision=monitor_decision,
                 ids_score=ids_score,
                 drift_velocity=vel,
                 ids_components=ids_components,
@@ -377,7 +509,16 @@ class EnforcementEngine:
                 recovery_user_message=None,
                 tool_result=monitored_result,
                 ids_decision=shadow,
+                confirmation_id=confirmation_id,
+                confirmation_reason=gate_reason,
+                warnings=warnings,
             )
+
+        if confirmation_id is not None and ids_score >= self.ids_warn_threshold:
+            # The IDS stops the call before execution, so nothing awaits confirmation.
+            with self._pending_lock:
+                self._pending_confirmations.pop(confirmation_id, None)
+            gate_reason, confirmation_id = None, None
 
         if ids_score >= self.ids_block_threshold:
             audit("BLOCK", False, sync_log=True)
@@ -410,23 +551,29 @@ class EnforcementEngine:
                 tool_result=None,
             )
 
-        pass_sync = self.log_async is None
-        final_decision: str = "PREEMPTIVE_WARN" if preemptive else "PASS"
-        audit(final_decision, False, sync_log=pass_sync)
+        decision: Decision
+        if gate_reason is not None:
+            decision = "NEEDS_CONFIRMATION"
+        elif preemptive:
+            decision = "PREEMPTIVE_WARN"
+        else:
+            decision = "PASS"
+        audit(
+            decision,
+            False,
+            sync_log=self.log_async is None or gate_reason is not None,
+            failure_reason=_join_reasons(gate_reason, *warnings),
+            confirmation_id=confirmation_id,
+        )
 
         tool_result: ToolResult | None = None
-        if execute_tool:
+        if execute_tool and gate_reason is None:
             tool_result = self.tools.execute(
                 plan.tool_name,
                 approval_token=self._tool_approval_token,
                 **plan.arguments,
             )
 
-        decision: Decision
-        if final_decision == "PREEMPTIVE_WARN":
-            decision = "PREEMPTIVE_WARN"
-        else:
-            decision = "PASS"
         return EnforcementOutcome(
             decision=decision,
             ids_score=ids_score,
@@ -436,4 +583,7 @@ class EnforcementEngine:
             recovery_system_message=None,
             recovery_user_message=None,
             tool_result=tool_result,
+            confirmation_id=confirmation_id,
+            confirmation_reason=gate_reason,
+            warnings=warnings,
         )

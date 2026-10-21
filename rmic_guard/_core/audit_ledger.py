@@ -56,6 +56,8 @@ class AuditEntry:
     failure_reason: str | None = None
     false_positive: bool = False
     false_negative: bool = False
+    # Links a NEEDS_CONFIRMATION entry to the CONFIRMED entry that executed it.
+    confirmation_id: str | None = None
 
 
 GENESIS_HASH = "0" * 64
@@ -281,4 +283,5 @@ def entry_from_mapping(m: Mapping[str, Any]) -> AuditEntry:
         false_negative=bool(m.get("false_negative", False)),
         contract_hash=str(m["contract_hash"]),
         recovery_attempted=bool(m["recovery_attempted"]),
+        confirmation_id=None if m.get("confirmation_id") is None else str(m["confirmation_id"]),
     )

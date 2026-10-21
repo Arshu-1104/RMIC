@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from rmic_guard._core.exceptions import InvalidContractError
+from rmic_guard._core.hard_rules import parse_argument_rules, parse_deny_patterns
 
 __all__ = ["validate_contract_dict", "REQUIRED_FIELDS"]
 
@@ -106,6 +107,17 @@ def _check_parameter_constraints(problems: list[str], data: Mapping[str, Any]) -
                 problems.append(
                     f"parameter_constraints.{name}: min ({lo}) is greater than max ({hi})"
                 )
+        if "confirm_above" in spec:
+            ca = spec["confirm_above"]
+            if isinstance(ca, bool) or not isinstance(ca, (int, float)):
+                problems.append(f"parameter_constraints.{name}.confirm_above: must be numeric")
+            elif isinstance(hi, (int, float)) and not isinstance(hi, bool) and ca >= hi:
+                problems.append(
+                    f"parameter_constraints.{name}.confirm_above ({ca}) must be below max ({hi}); "
+                    "values above max are blocked outright"
+                )
+            elif isinstance(lo, (int, float)) and not isinstance(lo, bool) and ca < lo:
+                problems.append(f"parameter_constraints.{name}.confirm_above ({ca}) is below min ({lo})")
 
 
 def _check_semantic_anchors(problems: list[str], data: Mapping[str, Any]) -> None:
@@ -194,6 +206,15 @@ def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None
     _check_str_list(problems, data, "compliance_tags", required=False)
     _check_data_scope(problems, data)
     _check_parameter_constraints(problems, data)
+    if data.get("argument_rules") is not None:
+        allowed = data.get("allowed_actions")
+        parse_argument_rules(
+            data["argument_rules"],
+            allowed_actions=tuple(allowed) if _is_str_list(allowed) else (),
+            problems=problems,
+        )
+    if data.get("deny_patterns") is not None:
+        parse_deny_patterns(data["deny_patterns"], problems=problems)
     _check_threshold(problems, data, "ids_warn_threshold")
     _check_threshold(problems, data, "ids_block_threshold")
     if (
