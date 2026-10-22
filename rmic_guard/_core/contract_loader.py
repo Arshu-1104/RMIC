@@ -21,7 +21,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rmic_guard._core.exceptions import ContractIntegrityError, ContractNotSealedError, InvalidContractError
-from rmic_guard._core.hard_rules import ArgumentRule, DenyPatternConfig, parse_argument_rules, parse_deny_patterns
+from rmic_guard._core.hard_rules import (
+    ArgumentRule,
+    DenyPatternConfig,
+    SessionLimit,
+    parse_argument_rules,
+    parse_deny_patterns,
+    parse_session_limits,
+)
 from rmic_guard._core.validation import validate_contract_dict
 from rmic_guard._utils.config import load_config
 
@@ -126,6 +133,8 @@ class RMICContract:
     deny_patterns: DenyPatternConfig | None = None
     # Seconds a NEEDS_CONFIRMATION id stays valid (None: the engine default).
     confirmation_ttl_seconds: float | None = None
+    # Per-session running totals (v0.4.1); the totals themselves live in GuardSession.
+    session_limits: tuple[SessionLimit, ...] = ()
 
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
@@ -168,6 +177,8 @@ class RMICContract:
             d["deny_patterns"] = json.loads(self.deny_patterns.raw_json)
         if self.confirmation_ttl_seconds is not None:
             d["confirmation_ttl_seconds"] = self.confirmation_ttl_seconds
+        if self.session_limits:
+            d["session_limits"] = {s.tool: json.loads(s.raw_json) for s in self.session_limits}
         if self.anchor_embedding:
             d["anchor_embedding"] = list(self.anchor_embedding)
         return d
@@ -254,6 +265,9 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
         deny_patterns=parse_deny_patterns(data.get("deny_patterns")),
         # Kept as written (int or float) so to_dict() hashes identically.
         confirmation_ttl_seconds=data.get("confirmation_ttl_seconds"),
+        session_limits=parse_session_limits(
+            data.get("session_limits"), allowed_actions=_as_tuple_str(data.get("allowed_actions"))
+        ),
     )
 
 
@@ -396,6 +410,7 @@ def create_contract(
     argument_rules: Mapping[str, Mapping[str, Any]] | None = None,
     deny_patterns: Mapping[str, Any] | None = None,
     confirmation_ttl_seconds: float | None = None,
+    session_limits: Mapping[str, Mapping[str, Any]] | None = None,
     save_to: str | Path | None = None,
     model_name: str | None = None,
     require_embedding: bool = True,
@@ -461,6 +476,8 @@ def create_contract(
         data["deny_patterns"] = json.loads(json.dumps(deny_patterns))
     if confirmation_ttl_seconds is not None:
         data["confirmation_ttl_seconds"] = confirmation_ttl_seconds
+    if session_limits is not None:
+        data["session_limits"] = json.loads(json.dumps(session_limits))
 
     validate_contract_dict(data, source="RMICContract.create(...)")
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from rmic_guard._core.exceptions import InvalidContractError
-from rmic_guard._core.hard_rules import parse_argument_rules, parse_deny_patterns
+from rmic_guard._core.hard_rules import parse_argument_rules, parse_deny_patterns, parse_session_limits
 
 __all__ = ["validate_contract_dict", "REQUIRED_FIELDS"]
 
@@ -215,6 +215,13 @@ def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None
         )
     if data.get("deny_patterns") is not None:
         parse_deny_patterns(data["deny_patterns"], problems=problems)
+    if data.get("session_limits") is not None:
+        allowed = data.get("allowed_actions")
+        parse_session_limits(
+            data["session_limits"],
+            allowed_actions=tuple(allowed) if _is_str_list(allowed) else (),
+            problems=problems,
+        )
     if data.get("confirmation_ttl_seconds") is not None:
         ttl = data["confirmation_ttl_seconds"]
         if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 0 < ttl < float("inf"):

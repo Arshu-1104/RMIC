@@ -1,4 +1,4 @@
-"""v0.4 contract-level hard-rule extensions: argument_rules, confirm_above, deny_patterns."""
+"""Contract-level hard-rule extensions: argument_rules, confirm_above, deny_patterns (v0.4), session_limits (v0.4.1)."""
 
 from __future__ import annotations
 
@@ -505,6 +505,151 @@ class TestDenyPatterns:
             Guard(_contract(deny_patterns=spec))
 
 
+# ── session_limits ──────────────────────────────────────────────────────────
+
+
+LIMITS = {"transfer_funds": {"param": "amount", "max_total": 1000}}
+
+
+class TestSessionLimits:
+    def test_split_transfers_are_blocked_at_the_total(self) -> None:
+        guard, calls = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        for _ in range(4):
+            assert s.check("transfer_funds", amount=250, to_account="1234").decision == "PASS"
+        r = s.check("transfer_funds", amount=0.01, to_account="1234")
+        assert (r.decision, r.reason, r.executed) == ("BLOCK", "session_limit:transfer_funds:amount", False)
+        assert len(calls) == 4 and s.session_totals == {"transfer_funds:amount": 1000.0}
+
+    def test_normal_small_transfers_are_allowed(self) -> None:
+        guard, calls = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        results = [s.check("transfer_funds", amount=a, to_account="1234") for a in (100, 200, 50.5)]
+        assert all(r.allowed and r.executed for r in results) and len(calls) == 3
+        assert s.session_totals == {"transfer_funds:amount": 350.5}
+
+    def test_a_new_session_starts_from_zero(self) -> None:
+        guard, _ = _guard(session_limits=LIMITS)
+        assert guard.session("u1").check("transfer_funds", amount=1000, to_account="1234").allowed
+        assert not guard.session("u1").check("transfer_funds", amount=1, to_account="1234").allowed
+        assert guard.session("u2").check("transfer_funds", amount=1000, to_account="1234").allowed
+        assert guard.check("transfer_funds", amount=1000, to_account="1234").allowed  # default session
+
+    def test_reset_clears_the_total(self) -> None:
+        guard, _ = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        assert s.check("transfer_funds", amount=1000, to_account="1234").allowed
+        s.reset()
+        assert s.session_totals == {} and s.check("transfer_funds", amount=1000, to_account="1234").allowed
+
+    def test_blocked_calls_do_not_count(self) -> None:
+        guard, _ = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        assert s.check("transfer_funds", amount=600, to_account="1234").allowed
+        assert s.check("transfer_funds", amount=600, to_account="1234").reason == "session_limit:transfer_funds:amount"
+        assert s.check("transfer_funds", amount=60000, to_account="1234").reason == "parameter_constraint:amount:above_max"
+        assert s.session_totals == {"transfer_funds:amount": 600.0}
+        assert s.check("transfer_funds", amount=400, to_account="1234").allowed
+
+    def test_a_single_call_above_max_total_is_blocked(self) -> None:
+        guard, calls = _guard(session_limits=LIMITS)
+        assert guard.check("transfer_funds", amount=1000.01, to_account="1234").reason == "session_limit:transfer_funds:amount"
+        assert calls == []
+
+    def test_pending_confirmations_count_when_issued(self) -> None:
+        guard, calls = _guard(parameter_constraints=CONFIRM,
+                              session_limits={"transfer_funds": {"param": "amount", "max_total": 25000}})
+        s = guard.session("u1")
+        r = s.check("transfer_funds", amount=20000, to_account="1234")
+        assert r.decision == "NEEDS_CONFIRMATION" and s.session_totals == {"transfer_funds:amount": 20000.0}
+        assert s.check("transfer_funds", amount=6000, to_account="1234").reason == "session_limit:transfer_funds:amount"
+        assert guard.confirm(r.confirmation_id).decision == "CONFIRMED" and len(calls) == 1
+        assert s.session_totals == {"transfer_funds:amount": 20000.0}  # not counted twice
+
+    @pytest.mark.parametrize("amount", [-500, "abc", None, True, float("inf"), float("nan")])
+    def test_values_that_cannot_be_counted_are_blocked(self, amount: Any) -> None:
+        guard, calls = _guard(session_limits=LIMITS, parameter_constraints={})
+        r = guard.check("transfer_funds", amount=amount, to_account="1234")
+        assert r.reason == "session_limit:transfer_funds:amount:invalid_value" and calls == []
+
+    def test_only_the_named_tool_and_param_count(self) -> None:
+        guard, _ = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        assert s.check("check_balance", amount=5000).allowed
+        assert s.check("transfer_funds", to_account="1234").allowed
+        assert s.session_totals == {}
+        assert s.check("Transfer-Funds", amount=1000, to_account="1234").allowed  # same tool-name matching
+        assert not s.check("transfer_funds", amount=1, to_account="1234").allowed
+
+    def test_concurrent_calls_cannot_overshoot(self) -> None:
+        import threading
+
+        guard, calls = _guard(session_limits=LIMITS)
+        s = guard.session("u1")
+        barrier = threading.Barrier(20)
+
+        def send() -> None:
+            barrier.wait()
+            s.check("transfer_funds", amount=100, to_account="1234")
+
+        threads = [threading.Thread(target=send) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(calls) == 10 and s.session_totals == {"transfer_funds:amount": 1000.0}
+
+    @pytest.mark.parametrize(
+        "limits, problem",
+        [
+            ({}, "non-empty object"),
+            ({"transfer_funds": {"param": "amount"}}, "exactly param and max_total"),
+            ({"transfer_funds": {"param": "amount", "max_total": 10, "x": 1}}, "exactly param and max_total"),
+            ({"transfer_funds": {"param": "", "max_total": 10}}, "param"),
+            ({"transfer_funds": {"param": "amount", "max_total": 0}}, "positive number"),
+            ({"transfer_funds": {"param": "amount", "max_total": True}}, "positive number"),
+            ({"wire_money": {"param": "amount", "max_total": 10}}, "not in allowed_actions"),
+            ({"transfer_funds": {"param": "amount", "max_total": 10},
+              "Transfer_Funds": {"param": "amount", "max_total": 10}}, "duplicates"),
+        ],
+    )
+    def test_invalid_session_limits_are_rejected_at_load(self, limits: Any, problem: str) -> None:
+        with pytest.raises(InvalidContractError, match=problem):
+            Guard(_contract(session_limits=limits))
+
+
+class TestHardenedAccountPattern:
+    @pytest.mark.parametrize(
+        "account",
+        ["US133000000121212121212", "GB29NWBK60161331926819", "GB29 NWBK 6016 1331 9268 19",
+         "de89370400440532013000", "NO9386011117947"],
+    )
+    def test_ibans_are_rejected(self, account: str) -> None:
+        guard = Guard(load_example_contract("financial_agent_hardened"))
+        for arg in ("to_account", "recipient_account", "account_number"):
+            r = guard.check("transfer_funds", amount=50, arguments={arg: account})
+            assert r.reason == f"argument_pattern:transfer_funds:{arg}", (arg, account)
+
+    @pytest.mark.parametrize(
+        "account", ["4321", "1234567890", "account ending in 4321", "chk-1234", "user_account", "Alice Smith", "landlord"]
+    )
+    def test_allowed_account_forms_still_pass(self, account: str) -> None:
+        guard = Guard(load_example_contract("financial_agent_hardened"))
+        assert guard.check("transfer_funds", amount=50, to_account=account).allowed
+
+    @pytest.mark.parametrize("account", ["crypto-wallet-01", "0x5d5acA289F2A9E481fa2aEaD3FA465880Df84354", "", "12"])
+    def test_other_formats_are_rejected(self, account: str) -> None:
+        guard = Guard(load_example_contract("financial_agent_hardened"))
+        assert not guard.check("transfer_funds", amount=50, to_account=account).allowed
+
+    def test_hardened_session_limit_blocks_split_transfers(self) -> None:
+        guard = Guard(load_example_contract("financial_agent_hardened"))
+        s = guard.session("u1")
+        assert all(s.check("transfer_funds", amount=10000, to_account="4321").allowed for _ in range(5))
+        assert s.check("transfer_funds", amount=10000, to_account="4321").reason == "session_limit:transfer_funds:amount"
+        assert guard.session("u2").check("transfer_funds", amount=10000, to_account="4321").allowed
+
+
 # ── hashing and backward compatibility ──────────────────────────────────────
 
 
@@ -512,7 +657,7 @@ class TestHashAndCompatibility:
     def test_new_fields_are_covered_by_the_hash(self, tmp_path: Path) -> None:
         contract = RMICContract.create(**_contract(argument_rules=ARG_RULES, parameter_constraints=CONFIRM,
                                                    deny_patterns={"packs": ["guardrail_removal"]},
-                                                   confirmation_ttl_seconds=600),
+                                                   confirmation_ttl_seconds=600, session_limits=LIMITS),
                                        require_embedding=False)
         data = contract.to_dict()
         path = tmp_path / "c.json"
@@ -524,6 +669,7 @@ class TestHashAndCompatibility:
             lambda d: d["deny_patterns"].update(packs=[{"name": "guardrail_removal", "action": "warn"}]),
             lambda d: d["deny_patterns"].update(max_scan_chars=20),
             lambda d: d.update(confirmation_ttl_seconds=86400),
+            lambda d: d["session_limits"]["transfer_funds"].update(max_total=10**9),
         ):
             tampered = json.loads(json.dumps(data))
             mutate(tampered)
@@ -536,9 +682,9 @@ class TestHashAndCompatibility:
         assert hashlib.sha256((REPO / "contracts" / "financial_agent.json").read_bytes()).hexdigest() == old
         for name in RESEARCH_CONTRACTS:
             c = load_contract(REPO / "contracts" / f"{name}.json")
-            assert c.argument_rules == () and c.deny_patterns is None
+            assert c.argument_rules == () and c.deny_patterns is None and c.session_limits == ()
             assert all(p.confirm_above is None for p in c.parameter_constraints)
-            assert "argument_rules" not in c.to_dict() and "deny_patterns" not in c.to_dict()
+            assert not {"argument_rules", "deny_patterns", "session_limits"} & set(c.to_dict())
 
     @pytest.mark.parametrize("name", RESEARCH_CONTRACTS)
     def test_hard_rule_decisions_match_v0_3_snapshot(self, name: str) -> None:

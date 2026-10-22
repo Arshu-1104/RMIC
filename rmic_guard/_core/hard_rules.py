@@ -19,6 +19,9 @@ Three optional contract fields, all covered by the contract hash:
                    Only the first max_scan_chars characters of the message are
                    scanned; longer messages get a deny_pattern_scan_truncated
                    warning.
+  session_limits   per tool: a running total of one numeric argument per
+                   session; a call that would take it above max_total BLOCKs.
+                     {"transfer_funds": {"param": "amount", "max_total": 50000}}
 
 Deny patterns are heuristics: they catch explicit wording and miss rewordings.
 Everything here is deterministic; nothing uses embeddings.
@@ -40,11 +43,15 @@ __all__ = [
     "ArgumentRule",
     "DenyPatternConfig",
     "DenyRule",
+    "SessionLimit",
     "check_argument_rules",
+    "check_session_limits",
     "confirmation_reason",
     "deny_pattern_matches",
     "parse_argument_rules",
     "parse_deny_patterns",
+    "parse_session_limits",
+    "session_limit_amounts",
 ]
 
 MAX_PATTERN_LENGTH = 500  # characters per regex in a contract
@@ -257,6 +264,116 @@ def confirmation_reason(constraints: Any, arguments: Mapping[str, Any]) -> str |
         if value > float(c.confirm_above):
             return f"confirm_above:{c.name}"
     return None
+
+
+# ── session_limits ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class SessionLimit:
+    tool: str
+    param: str
+    max_total: float
+    raw_json: str = field(repr=False, compare=False)
+
+    @property
+    def key(self) -> str:
+        """Key of this limit's running total in a session's totals."""
+        return f"{_normalize_tool_name(self.tool)}:{self.param}"
+
+    @property
+    def reason(self) -> str:
+        return f"session_limit:{self.tool}:{self.param}"
+
+
+def parse_session_limits(
+    raw: Any, *, allowed_actions: tuple[str, ...] = (), problems: list[str] | None = None
+) -> tuple[SessionLimit, ...]:
+    """Validate contract["session_limits"]. Problems are appended to ``problems``
+    (or raised as ValueError when it is None)."""
+    collect = problems if problems is not None else []
+    limits = _parse_session_limits(raw, allowed_actions, collect)
+    if problems is None and collect:
+        raise ValueError("; ".join(collect))
+    return limits
+
+
+def _parse_session_limits(raw: Any, allowed_actions: tuple[str, ...], problems: list[str]) -> tuple[SessionLimit, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, Mapping) or not raw:
+        problems.append("session_limits: must be a non-empty object mapping tool names to {param, max_total}")
+        return ()
+    allowed_norm = {_normalize_tool_name(a) for a in allowed_actions}
+    seen: dict[str, str] = {}
+    limits: list[SessionLimit] = []
+    for tool, spec in raw.items():
+        where = f"session_limits.{tool}"
+        norm = _normalize_tool_name(str(tool))
+        if norm in seen:
+            problems.append(f"{where}: duplicates session_limits.{seen[norm]} (tool names are matched case-insensitively)")
+            continue
+        seen[norm] = str(tool)
+        if allowed_norm and norm not in allowed_norm:
+            problems.append(f"{where}: {tool!r} is not in allowed_actions, so this limit could never apply")
+        if not isinstance(spec, Mapping) or set(spec) != {"param", "max_total"}:
+            problems.append(f"{where}: must be an object with exactly param and max_total")
+            continue
+        param, max_total = spec["param"], spec["max_total"]
+        if not isinstance(param, str) or not param:
+            problems.append(f"{where}.param: must be a non-empty argument name")
+            continue
+        if isinstance(max_total, bool) or not isinstance(max_total, (int, float)) or not 0 < max_total < float("inf"):
+            problems.append(f"{where}.max_total: must be a positive number, got {max_total!r}")
+            continue
+        limits.append(SessionLimit(str(tool), param, float(max_total), _canonical(spec)))
+    return tuple(limits)
+
+
+def _amount(value: Any) -> float | None:
+    """A finite, non-negative number (numeric strings accepted), else None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    return amount if 0 <= amount < float("inf") else None
+
+
+def check_session_limits(
+    limits: tuple[SessionLimit, ...], tool_name: str, arguments: Mapping[str, Any], totals: Mapping[str, float]
+) -> str | None:
+    """BLOCK reason if this call would take a session total above its max_total.
+
+    ``totals`` holds what earlier allowed calls in the session added (keyed by
+    SessionLimit.key). A value that is not a finite, non-negative number blocks
+    too (``<reason>:invalid_value``), since it could not be counted, or would
+    lower the total."""
+    planned = _normalize_tool_name(tool_name)
+    for limit in limits:
+        if _normalize_tool_name(limit.tool) != planned or limit.param not in arguments:
+            continue
+        amount = _amount(arguments[limit.param])
+        if amount is None:
+            return f"{limit.reason}:invalid_value"
+        if totals.get(limit.key, 0.0) + amount > limit.max_total:
+            return limit.reason
+    return None
+
+
+def session_limit_amounts(
+    limits: tuple[SessionLimit, ...], tool_name: str, arguments: Mapping[str, Any]
+) -> dict[str, float]:
+    """What an allowed call adds to each session total it is subject to."""
+    planned = _normalize_tool_name(tool_name)
+    added: dict[str, float] = {}
+    for limit in limits:
+        if _normalize_tool_name(limit.tool) == planned and limit.param in arguments:
+            amount = _amount(arguments[limit.param])
+            if amount is not None:
+                added[limit.key] = added.get(limit.key, 0.0) + amount
+    return added
 
 
 # ── deny_patterns ───────────────────────────────────────────────────────────

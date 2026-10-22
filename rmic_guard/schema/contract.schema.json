@@ -142,6 +142,20 @@
       "type": "number", "exclusiveMinimum": 0, "default": 600,
       "description": "Seconds a NEEDS_CONFIRMATION id stays valid; guard.confirm() of an older id fails (reason 'expired') and is audited. Guard(confirmation_ttl_seconds=...) overrides it."
     },
+    "session_limits": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Per-tool running total of one numeric argument within a Guard session, e.g. {\"transfer_funds\": {\"param\": \"amount\", \"max_total\": 50000}}. A call BLOCKs with session_limit:<tool>:<param> when the amounts of the session's earlier allowed calls (PASS, PREEMPTIVE_WARN, or NEEDS_CONFIRMATION when issued) plus its own exceed max_total; a value that is not a finite non-negative number BLOCKs with session_limit:<tool>:<param>:invalid_value. Each guard.session(id) has its own total; session.reset() clears it.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["param", "max_total"],
+        "additionalProperties": false,
+        "properties": {
+          "param": { "type": "string", "minLength": 1 },
+          "max_total": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
     "ids_warn_threshold": {
       "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,
       "description": "IDS score at/above which a WARN + re-anchoring recovery is triggered."

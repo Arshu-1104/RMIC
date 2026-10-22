@@ -5,7 +5,7 @@ Sealed identity contracts for the four research agent roles, plus example contra
 | File | What it is |
 |---|---|
 | `financial_agent.json`, `healthcare_research_agent.json`, `legal_review_agent.json`, `support_agent.json` | The research contracts used by the experiment, the paper and the IBM pilot. **Frozen:** keep them byte-identical (`scripts/seal_contracts.py` refuses to re-seal them without `--force`). Bundled in the package as `load_example_contract(name)`. |
-| `examples/financial_agent_hardened.json` | `financial_agent` plus the v0.4 hard-rule extensions (`confirm_above`, argument patterns). Bundled as `load_example_contract("financial_agent_hardened")`. |
+| `examples/financial_agent_hardened.json` | `financial_agent` plus the hard-rule extensions `confirm_above`, argument patterns that reject IBANs, and `session_limits` (max_total 50000 per session). Bundled as `load_example_contract("financial_agent_hardened")`. |
 | `examples/template.json` | A minimal, unsealed starting point for your own contract (below). |
 
 ## Using the template
