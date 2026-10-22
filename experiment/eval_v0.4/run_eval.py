@@ -2,6 +2,13 @@
 
     python experiment/eval_v0.4/run_eval.py            # the single real run -> results.md, *.csv
     python experiment/eval_v0.4/run_eval.py --smoke    # code check on synthetic items, writes to a temp dir
+    python experiment/eval_v0.4/run_eval.py --verify   # re-run into a temp dir, compare with the committed results
+
+The AgentHarm prompts are not in the repository: run scripts/fetch_agentharm.py first (see
+prompts/external/external_sets.py). results.md withholds their text and lists their IDs.
+
+--verify loads condition (b)'s financial_agent_hardened contract as it was at the commit the
+run recorded, so later edits to that example contract do not count as differences.
 
 Prints counts and status only, never item text.
 """
@@ -25,6 +32,9 @@ sys.path.insert(0, str(REPO))
 os.environ.pop("RMIC_CONFIG", None)  # contracts' own thresholds
 
 from rmic_guard import Guard, RMICGuardWarning, load_contract, load_example_contract  # noqa: E402
+
+sys.path.insert(0, str(REPO / "prompts" / "external"))
+from external_sets import WITHHELD, load_external  # noqa: E402
 
 warnings.simplefilter("ignore", RMICGuardWarning)
 
@@ -61,9 +71,17 @@ def auc(pos: list[float], neg: list[float]) -> float:
     return wins / (len(pos) * len(neg))
 
 
-def guards(name: str) -> dict[str, Guard]:
+def _hardened_at(commit: str | None):
+    if commit is None:
+        return load_example_contract("financial_agent_hardened")
+    show = subprocess.run(["git", "show", f"{commit}:rmic_guard/examples/financial_agent_hardened.json"],
+                          cwd=REPO, capture_output=True, text=True, encoding="utf-8", check=True)
+    return Guard(json.loads(show.stdout), semantic=False).contract
+
+
+def guards(name: str, hardened_commit: str | None = None) -> dict[str, Guard]:
     research = load_contract(REPO / "contracts" / f"{name}.json")
-    b_contract = load_example_contract("financial_agent_hardened") if name == "financial_agent" else research
+    b_contract = _hardened_at(hardened_commit) if name == "financial_agent" else research
     c_dict = b_contract.to_dict()
     c_dict.pop("contract_hash", None)
     c_dict["deny_patterns"] = DENY_PACKS
@@ -117,20 +135,29 @@ def load_sets(smoke: bool) -> dict[tuple[str, str], dict]:
         for name in CONTRACTS:
             path = folder / f"{name}.json"
             if path.exists():
-                out[(set_name, name)] = json.loads(path.read_text(encoding="utf-8"))
+                out[(set_name, name)] = (load_external(name) if set_name == "external"
+                                         else json.loads(path.read_text(encoding="utf-8")))
     return out
+
+
+def _recorded_run() -> tuple[str, str]:
+    """(header line, commit) of the committed results.md."""
+    header = (OUT / "results.md").read_text(encoding="utf-8").splitlines()[2]
+    return header, header.split("at commit `", 1)[1].split("`", 1)[0]
 
 
 def main() -> int:
     smoke = "--smoke" in sys.argv
-    out_dir = Path(tempfile.mkdtemp(prefix="eval_v04_smoke_")) if smoke else OUT
+    verify = "--verify" in sys.argv
+    out_dir = Path(tempfile.mkdtemp(prefix="eval_v04_smoke_" if smoke else "eval_v04_verify_")) if smoke or verify else OUT
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+    hardened_commit = _recorded_run()[1] if verify else None
     sets = load_sets(smoke)
     turn_rows, item_rows, errors = [], [], []
     for (set_name, name), doc in sets.items():
         try:
-            g = guards(name)
+            g = guards(name, hardened_commit)
         except Exception:
             errors.append(f"{set_name}/{name}: building guards failed\n{traceback.format_exc()}")
             continue
@@ -160,7 +187,26 @@ def main() -> int:
     print(f"items x conditions: {len(item_rows)}; turns x conditions: {len(turn_rows)}; errors: {len(errors)}")
     print(f"STOP: {'yes' if stop else 'no'} {why}")
     print(f"wrote {out_dir}")
+    if verify:
+        return _compare(out_dir) or (1 if errors else 0)
     return 1 if errors else 0
+
+
+def _compare(out_dir: Path) -> int:
+    """0 iff the re-run matches the committed results (results.md apart from its run header)."""
+    header = _recorded_run()[0]
+    different = []
+    for fname in ("items.csv", "turns.csv", "results.md"):
+        new = (out_dir / fname).read_text(encoding="utf-8")
+        old = (OUT / fname).read_text(encoding="utf-8")
+        if fname == "results.md":
+            lines = new.splitlines(keepends=True)
+            lines[2] = header + "\n"
+            new = "".join(lines)
+        if new != old:
+            different.append(fname)
+    print("VERIFY: identical to the committed results" if not different else f"VERIFY: DIFFERENT {different}")
+    return 1 if different else 0
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
@@ -193,6 +239,8 @@ def _stop_rule(items: list[dict], errors: list[str]) -> tuple[bool, str]:
 
 
 def _messages(item: dict) -> str:
+    if item.get("source") == "agentharm":  # not redistributed; see scripts/fetch_agentharm.py
+        return WITHHELD.format(source_id=item["source_id"])
     seen = []
     for t in item["turns"]:
         if t["message"] not in seen:

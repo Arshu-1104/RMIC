@@ -1,8 +1,8 @@
 """
 Dual enforcement between reasoning output and tool execution.
 
-Pass 1: hard rules (forbidden tools, argument rules, parameter bounds, data
-        scope, contract deny patterns).
+Pass 1: hard rules (forbidden tools, argument rules, parameter bounds,
+        per-session totals, data scope, contract deny patterns).
 Pass 2: IDS composite; block only when IDS >= block threshold.
 Before a tool executes: contract confirm_above limits turn the call into
 NEEDS_CONFIRMATION; confirm(confirmation_id) executes it exactly once.
@@ -19,12 +19,17 @@ import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Literal, NamedTuple
+from typing import Any, Callable, Literal, Mapping, NamedTuple
 
 from rmic_guard._core.audit_ledger import AuditEntry, AuditLedger, hash_text
 from rmic_guard._core.contract_loader import RMICContract
 from rmic_guard._core.exceptions import ConfirmationNotFoundError, EnforcementConfigError, RMICGuardWarning
-from rmic_guard._core.hard_rules import check_argument_rules, confirmation_reason, deny_pattern_matches
+from rmic_guard._core.hard_rules import (
+    check_argument_rules,
+    check_session_limits,
+    confirmation_reason,
+    deny_pattern_matches,
+)
 from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
 from rmic_guard._core.planning import PlannedToolCall
@@ -112,7 +117,9 @@ def _normalize_tool_name(name: str) -> str:
     return (name or "").strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def _check_hard_rules(contract: RMICContract, plan: PlannedToolCall) -> str | None:
+def _check_hard_rules(
+    contract: RMICContract, plan: PlannedToolCall, session_totals: Mapping[str, float] | None = None
+) -> str | None:
     planned = _normalize_tool_name(plan.tool_name)
     forbidden_norm = {_normalize_tool_name(a) for a in contract.forbidden_actions}
     allowed_norm = {_normalize_tool_name(a) for a in contract.allowed_actions}
@@ -127,6 +134,9 @@ def _check_hard_rules(contract: RMICContract, plan: PlannedToolCall) -> str | No
     pr = _check_parameter_constraints(contract, plan.arguments)
     if pr:
         return pr
+    sl = check_session_limits(contract.session_limits, plan.tool_name, plan.arguments, session_totals or {})
+    if sl:
+        return sl
     ds = _check_data_scope(contract, plan)
     if ds:
         return ds
@@ -453,7 +463,9 @@ class EnforcementEngine:
             )
         plan = entry.plan
         c = self.contract
-        hard = _check_hard_rules(c, plan)  # contracts are immutable; defensive only
+        # Contracts are immutable; defensive only. The amount already counted
+        # toward any session total when NEEDS_CONFIRMATION was issued.
+        hard = _check_hard_rules(c, plan)
         decision: Decision = "BLOCK" if hard else "CONFIRMED"
         self._log(
             AuditEntry(
@@ -495,6 +507,7 @@ class EnforcementEngine:
         drift_type: str | None = None,
         execute_tool: bool = True,
         enforcement_mode: EnforcementMode = "full",
+        session_totals: Mapping[str, float] | None = None,
     ) -> EnforcementOutcome:
         """
         Run dual enforcement. Executes the tool only when decision is PASS and execute_tool is True.
@@ -512,12 +525,17 @@ class EnforcementEngine:
         argument above a contract confirm_above limit returns NEEDS_CONFIRMATION
         instead (tool not run; see confirm()), and deny_patterns with action
         "warn" are reported in outcome.warnings.
+
+        session_totals: what earlier allowed calls of this session added to
+        each contract session_limits total (keyed by SessionLimit.key). The
+        engine keeps no session state; Guard sessions track and pass it. None
+        checks each call on its own against max_total.
         """
         c = self.contract
         if enforcement_mode == "ids_only":
             hard = None
         else:
-            hard = _check_hard_rules(c, plan)
+            hard = _check_hard_rules(c, plan, session_totals)
         if hard:
             # A deny-pattern block also reports warn matches before it and
             # scan truncation; other hard rules fire before deny patterns run.

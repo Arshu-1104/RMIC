@@ -10,6 +10,10 @@ Inputs (pinned in SELECTION.md):
 Item text is copied verbatim; only tool and argument names are renamed, using the tables below
 (copied from SELECTION.md). Selection is mechanical: an item is kept for a contract iff at
 least one of its turns uses a tool that the contract's table maps. Prints counts only.
+
+The files are written with AgentHarm's prompts withheld (external_sets.redact): the repository
+does not redistribute them. external_sets.load_external() fills them back in from the copy
+scripts/fetch_agentharm.py downloads.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import argparse
 import ast
 import json
 from pathlib import Path
+
+from external_sets import dumps, redact
 
 HERE = Path(__file__).resolve().parent
 
@@ -152,7 +158,7 @@ def main() -> None:
             "attacks": [s for s in selected if s["label"] == "attack"],
             "legitimate": [s for s in selected if s["label"] == "legitimate"],
         }
-        (HERE / f"{contract}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        (HERE / f"{contract}.json").write_bytes(dumps(redact(doc)).encode("utf-8"))
         by_src = {}
         for s in selected:
             by_src.setdefault(f"{s['source']}/{s['label']}", 0)

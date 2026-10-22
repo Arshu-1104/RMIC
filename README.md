@@ -80,9 +80,9 @@ comes into play.
 
 ### Contract hard-rule extensions (v0.4)
 
-Three optional contract fields tighten the hard rules. They are validated when the contract is
-loaded (an invalid regex is rejected), covered by the contract hash, and contracts without them
-behave exactly as before.
+Four optional contract fields tighten the hard rules (`session_limits` since 0.4.1). They are
+validated when the contract is loaded (an invalid regex is rejected), covered by the contract
+hash, and contracts without them behave exactly as before.
 
 **`argument_rules`: what a tool's arguments may look like.** Use `allowed_args` only for tools
 with a fixed schema (e.g. function calling): an LLM writing free-form JSON invents argument names,
@@ -175,9 +175,44 @@ to that point, and the result carries the warning `deny_pattern_scan_truncated:1
 > `prompts/v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
 > They are off in every bundled contract. Treat them as a cheap extra layer, not as protection.
 
+**`session_limits`: a running total per session.** Splitting one large transfer into many
+small ones gets past `max` and `confirm_above`, which look at one call at a time. A session
+limit adds up one numeric argument over a `guard.session(...)`:
+
+```json
+"session_limits": {"transfer_funds": {"param": "amount", "max_total": 50000}}
+```
+
+```python
+s = guard.session("user-42")
+s.check("transfer_funds", amount=30000, to_account="4321")   # PASS
+s.check("transfer_funds", amount=25000, to_account="4321")   # BLOCK session_limit:transfer_funds:amount
+s.session_totals                                             # {"transfer_funds:amount": 30000.0}
+guard.session("user-43").check("transfer_funds", amount=25000, to_account="4321")   # PASS: own total
+```
+
+- A call is blocked when the amounts of the session's earlier allowed calls plus its own exceed
+  `max_total`. Blocked calls add nothing.
+- A `NEEDS_CONFIRMATION` call counts when it is issued, so pending transfers can't be stacked.
+  `guard.confirm()` doesn't add it again, and a cancelled or expired confirmation is not
+  refunded.
+- A value that is not a finite, non-negative number is blocked with
+  `session_limit:<tool>:<param>:invalid_value`, since it could lower the total.
+- Totals live in memory, one per session id. `session.reset()` clears them, and they don't
+  survive a restart. Each session id must stand for one end user: a caller who can pick a fresh
+  session id gets a fresh total.
+
 `contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
-is the research `financial_agent` contract plus `confirm_above: 10000` and account-format
-`patterns` (no `allowed_args`).
+is the research `financial_agent` contract plus:
+
+- `confirm_above: 10000`;
+- account-format `patterns` (no `allowed_args`) that reject IBAN-shaped values (since 0.4.1);
+- `session_limits` with `max_total: 50000` on `transfer_funds` `amount`, the same as the
+  per-transfer `max` (since 0.4.1).
+
+A session therefore can't move more than one maximum transfer in total. That doesn't stop the
+v0.4 evaluation's $30,000 split (3 × $10,000): a lower `max_total` would, at the cost of
+blocking legitimate sessions above it. The value was not tuned on any evaluation set.
 
 ### Evaluation (v0.4)
 
@@ -191,7 +226,8 @@ checked with `guard.check()` and `semantic=False`, under three conditions:
 - **(c)** (b) plus the three deny-pattern packs.
 
 Cells are k/n with a Wilson 95% interval. Full results, including every miss and every false
-positive verbatim: [`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
+positive verbatim (AgentHarm prompts withheld, see below):
+[`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
 
 | Set | Items | Attacks blocked (a) / (b) / (c) | Legitimate blocked (a) / (b) / (c) |
 |---|---|---|---|
@@ -207,7 +243,8 @@ How to read it:
 - **The 8 external attacks that got through** are all `financial_agent` transfers through the
   allowed `transfer_funds` tool: AgentDojo injection tasks sending money to an attacker's IBAN,
   and InjecAgent payment requests.
-  - The account pattern accepts an IBAN as a valid account label.
+  - The account pattern accepts an IBAN as a valid account label (0.4.1 rejects IBANs in
+    `financial_agent_hardened`; the results above are for 0.4.0).
   - The one $30,000 attack is split into transfers of at most $10,000, so `confirm_above: 10000`
     never fires.
 - **Deny patterns are wording heuristics.** They added 3 blocks on the generated set and none on
@@ -221,6 +258,14 @@ How to read it:
   - Indirect injections were scored as if the attack text were the user's message, an upper
     bound for deny patterns.
   - A human-written blind set (`prompts/v3/README.md`) is still outstanding.
+- **Datasets and licences.** AgentDojo and InjecAgent are MIT-licensed. AgentHarm
+  (ai-safety-institute/AgentHarm) is MIT-licensed with an additional clause: use it only to
+  improve the safety and security of AI systems, and for evaluation, not training. The
+  repository does not redistribute AgentHarm's prompts. `prompts/external/` and `results.md`
+  keep their behaviour IDs only, and `python scripts/fetch_agentharm.py` downloads the pinned
+  revision into the git-ignored `data/agentharm/`. After that, `validate_sets.py --check` and
+  `run_eval.py --verify` rebuild and check the full set. Attribution and licence texts:
+  [`prompts/external/README.md`](prompts/external/README.md).
 
 ### Sealing
 

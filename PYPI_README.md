@@ -142,6 +142,9 @@ Optional contract fields, validated at load and covered by the contract hash:
   `guardrail_removal`, your own regexes and `prohibited_terms`, matched against the user's
   message → `BLOCK deny_pattern:<pack>:<id>` or a warning. **These are heuristics: rewordings
   evade them.**
+- `session_limits` (0.4.1): a running total of one argument per `guard.session(...)`, e.g.
+  `{"transfer_funds": {"param": "amount", "max_total": 50000}}`, so split transfers →
+  `BLOCK session_limit:<tool>:<param>`.
 
 See the [README on GitHub](https://github.com/Arshu-1104/RMIC#contract-hard-rule-extensions-v04)
 for examples, and `load_example_contract("financial_agent_hardened")` for a contract using them.
@@ -159,6 +162,9 @@ contract).
   attacks from legitimate requests (ROC AUC 0.48 and 0.59).
 
 [Full results](https://github.com/Arshu-1104/RMIC/blob/main/experiment/eval_v0.4/results.md).
+AgentHarm is MIT-licensed with an additional clause (safety and security use only, evaluation
+not training); the repository keeps only its behaviour IDs and downloads the prompts with
+`scripts/fetch_agentharm.py`.
 
 **Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
 fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the

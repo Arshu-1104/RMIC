@@ -4,6 +4,48 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+## 0.4.1 — not yet tagged
+
+### Added
+
+- **`session_limits`** (optional contract field, validated at load, covered by the contract
+  hash): a running total of one numeric argument per `guard.session(...)`, e.g.
+  `{"transfer_funds": {"param": "amount", "max_total": 50000}}`.
+  - A call whose amount would take the session's total above `max_total` is blocked with
+    `session_limit:<tool>:<param>`, so one transfer split into many small ones is stopped.
+  - Calls that pass count toward the total, and so does a `NEEDS_CONFIRMATION` call, when it is
+    issued; blocked calls don't count.
+  - Values that are not finite and non-negative are blocked with `...:invalid_value`.
+  - Each session id has its own total. `GuardSession.session_totals` shows it and
+    `session.reset()` clears it. Contracts without the field behave and hash exactly as before.
+- `EnforcementEngine.evaluate_and_maybe_execute(..., session_totals=...)`: the engine itself
+  keeps no session state.
+- `scripts/fetch_agentharm.py`: downloads the AgentHarm prompts of the v0.4 external evaluation
+  set from the official source (pinned revision, SHA-256 checked) into the git-ignored
+  `data/agentharm/`.
+- `experiment/eval_v0.4/run_eval.py --verify`: re-runs the v0.4 evaluation and checks it
+  matches the committed results. It currently does: identical, 0 errors.
+
+### Changed
+
+- **`financial_agent_hardened`** (example contract, `contract_version` 1.2.0, new
+  `contract_hash` `7367bcabc06c4cca28153593e294ce6f4c95a6398c620eee1137c72fdd76c8fd`):
+  - The account patterns reject IBAN-shaped values: a country code, 2 check digits and 11–30
+    alphanumerics, with optional single spaces.
+  - It adds `session_limits` with `max_total: 50000` on `transfer_funds` `amount`.
+  - The research contracts are unchanged.
+
+### Repository
+
+- The repository no longer redistributes AgentHarm prompts. `prompts/external/<contract>.json`
+  and `experiment/eval_v0.4/results.md` keep AgentHarm behaviour IDs, labels and tool mappings
+  only, with a placeholder for each message.
+  - `prompts/external/external_sets.py` fills the prompts back in from the downloaded copy.
+  - `validate_sets.py --check` confirms that the result is byte-identical to the sets frozen in
+    0.4.0.
+  - Earlier commits still contain the text: history was not rewritten.
+- `.gitignore` covers `dist/`, `build/` and `*.egg-info/`.
+
 ## 0.4.0 — 2026-10-21
 
 ### Added

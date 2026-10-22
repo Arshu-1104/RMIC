@@ -25,6 +25,7 @@ signed audit log, and runs the re-anchoring recovery loop for LLM plans.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import threading
@@ -48,6 +49,7 @@ from rmic_guard._core.enforcement_engine import (
     PendingConfirmation,
 )
 from rmic_guard._core.exceptions import ContractNotSealedError, RMICGuardError, RMICGuardWarning
+from rmic_guard._core.hard_rules import session_limit_amounts
 from rmic_guard._core.planning import PlannedToolCall
 from rmic_guard._core.tool_layer import ToolRegistry
 
@@ -59,6 +61,10 @@ SemanticMode = Union[bool, Literal["monitor"]]
 _ENFORCEMENT_MODES = {False: "hard_rules_only", True: "full", "monitor": "monitor"}
 
 _ALLOWED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN", "CONFIRMED"})
+# Decisions whose amounts count toward contract session_limits totals. A
+# NEEDS_CONFIRMATION counts when issued (confirm() then adds nothing), and is
+# not refunded if it is cancelled or expires.
+_COUNTED_DECISIONS = frozenset({"PASS", "PREEMPTIVE_WARN", "NEEDS_CONFIRMATION"})
 # Bounded so a long-lived session can't grow without limit; the IDS
 # trajectory and tool-frequency signals only look at a recent window anyway.
 _HISTORY_LIMIT = 100
@@ -214,20 +220,25 @@ def _make_reasoning_backend(llm: Any) -> Any:
 
 
 class _SessionState:
-    __slots__ = ("recent_ids", "tool_history", "lock")
+    __slots__ = ("recent_ids", "tool_history", "totals", "lock", "limit_lock")
 
     def __init__(self) -> None:
         self.recent_ids: list[float] = []
         self.tool_history: list[str] = []
+        self.totals: dict[str, float] = {}  # contract session_limits running totals
         self.lock = threading.Lock()
+        # Held across check-and-count when the contract has session_limits, so
+        # concurrent calls in one session cannot both fit under max_total.
+        self.limit_lock = threading.Lock()
 
 
 class GuardSession:
     """An isolated conversation view of a Guard.
 
     Shares the Guard's contract, tools, engine and audit log, but keeps its
-    own IDS score history and tool-call history. Get one with
-    ``guard.session("user-42")``; the same id always returns the same history.
+    own IDS score history, tool-call history and contract session_limits
+    totals. Get one with ``guard.session("user-42")``; the same id always
+    returns the same history.
     """
 
     def __init__(self, guard: Guard, session_id: str, state: _SessionState) -> None:
@@ -245,11 +256,18 @@ class GuardSession:
         with self._state.lock:
             return tuple(self._state.tool_history)
 
+    @property
+    def session_totals(self) -> dict[str, float]:
+        """Running totals for the contract's session_limits, keyed "<tool>:<param>"."""
+        with self._state.lock:
+            return dict(self._state.totals)
+
     def reset(self) -> None:
-        """Forget this session's IDS and tool-call history."""
+        """Forget this session's IDS and tool-call history and its session_limits totals."""
         with self._state.lock:
             self._state.recent_ids.clear()
             self._state.tool_history.clear()
+            self._state.totals.clear()
 
     def check(
         self,
@@ -325,9 +343,16 @@ class GuardSession:
 
     def _enforce(self, plan: PlannedToolCall, *, recovery_attempted: bool = False) -> GuardResult:
         guard = self._guard
+        limits = guard.contract.session_limits
+        with self._state.limit_lock if limits else contextlib.nullcontext():
+            return self._enforce_counted(plan, recovery_attempted)
+
+    def _enforce_counted(self, plan: PlannedToolCall, recovery_attempted: bool) -> GuardResult:
+        guard = self._guard
         with self._state.lock:
             recent_ids = list(self._state.recent_ids)
             tool_history = list(self._state.tool_history)
+            totals = dict(self._state.totals)
 
         outcome = guard.engine.evaluate_and_maybe_execute(
             plan,
@@ -335,9 +360,14 @@ class GuardSession:
             tool_call_history=tool_history,
             execute_tool=guard.tools.has(plan.tool_name),
             enforcement_mode=_ENFORCEMENT_MODES[guard.semantic],
+            session_totals=totals,
         )
 
         with self._state.lock:
+            if outcome.decision in _COUNTED_DECISIONS:
+                added = session_limit_amounts(guard.contract.session_limits, plan.tool_name, plan.arguments)
+                for key, amount in added.items():
+                    self._state.totals[key] = self._state.totals.get(key, 0.0) + amount
             self._state.tool_history.append(plan.tool_name)
             del self._state.tool_history[:-_HISTORY_LIMIT]
             if guard.scores_ids:
