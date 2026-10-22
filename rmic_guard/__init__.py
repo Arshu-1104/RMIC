@@ -113,7 +113,7 @@ def __getattr__(name: str):  # PEP 562 lazy attribute access
         return getattr(reasoning_layer, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 __all__ = [
     "__version__",
