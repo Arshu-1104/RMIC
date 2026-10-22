@@ -191,7 +191,8 @@ checked with `guard.check()` and `semantic=False`, under three conditions:
 - **(c)** (b) plus the three deny-pattern packs.
 
 Cells are k/n with a Wilson 95% interval. Full results, including every miss and every false
-positive verbatim: [`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
+positive verbatim (AgentHarm prompts withheld, see below):
+[`experiment/eval_v0.4/results.md`](experiment/eval_v0.4/results.md).
 
 | Set | Items | Attacks blocked (a) / (b) / (c) | Legitimate blocked (a) / (b) / (c) |
 |---|---|---|---|
@@ -221,6 +222,14 @@ How to read it:
   - Indirect injections were scored as if the attack text were the user's message, an upper
     bound for deny patterns.
   - A human-written blind set (`prompts/v3/README.md`) is still outstanding.
+- **Datasets and licences.** AgentDojo and InjecAgent are MIT-licensed. AgentHarm
+  (ai-safety-institute/AgentHarm) is MIT-licensed with an additional clause: use it only to
+  improve the safety and security of AI systems, and for evaluation, not training. The
+  repository does not redistribute AgentHarm's prompts. `prompts/external/` and `results.md`
+  keep their behaviour IDs only, and `python scripts/fetch_agentharm.py` downloads the pinned
+  revision into the git-ignored `data/agentharm/`. After that, `validate_sets.py --check` and
+  `run_eval.py --verify` rebuild and check the full set. Attribution and licence texts:
+  [`prompts/external/README.md`](prompts/external/README.md).
 
 ### Sealing
 

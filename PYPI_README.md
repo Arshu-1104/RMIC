@@ -159,6 +159,9 @@ contract).
   attacks from legitimate requests (ROC AUC 0.48 and 0.59).
 
 [Full results](https://github.com/Arshu-1104/RMIC/blob/main/experiment/eval_v0.4/results.md).
+AgentHarm is MIT-licensed with an additional clause (safety and security use only, evaluation
+not training); the repository keeps only its behaviour IDs and downloads the prompts with
+`scripts/fetch_agentharm.py`.
 
 **Sealing:** the contract hash covers `anchor_embedding`, which depends on the machine and
 fastembed version, so seal a contract once (`rmic seal contract.json`) and distribute the
