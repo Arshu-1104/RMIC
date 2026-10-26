@@ -17,3 +17,6 @@ build/
 # Local virtualenvs and editor settings
 .venv*/
 .vscode/
+
+# Real-data evaluation datasets (scripts/fetch_real_eval_data.py); never committed
+data/real_eval/

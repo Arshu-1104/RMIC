@@ -267,6 +267,62 @@ How to read it:
   `run_eval.py --verify` rebuild and check the full set. Attribution and licence texts:
   [`prompts/external/README.md`](prompts/external/README.md).
 
+### Evaluation on public real-world data
+
+One pre-registered run ([plan](experiment/eval_real_data/PLAN.md), committed first), with no
+tuning:
+- **Attacks:** 1,000 prompt-injection attempts written by players of Lakera's Gandalf game.
+- **Ordinary requests:** 13,083 public online-banking queries from Banking77.
+- **Contract:** `financial_agent_hardened`.
+
+The attacks are text only, so each was sent with an allowed, in-limit action (a $500 transfer,
+and separately a balance check). Each Banking77 query was paired with a tool chosen from its
+intent name. Cells are k/n with a Wilson 95% interval.
+
+| Condition | Attacks blocked (all 1,000) | Attacks blocked (test split, 112) | Banking77 blocked | Banking77 sent for confirmation |
+|---|---|---|---|---|
+| (a) hard rules | 0/1000 (0.0%, 0.0–0.4) | 0/112 (0.0%, 0.0–3.3) | 0/13083 (0.0%, 0.0–0.0) | 95/13083 (0.7%, 0.6–0.9) |
+| (b) + deny patterns | 32/1000 (3.2%, 2.3–4.5) | 2/112 (1.8%, 0.5–6.3) | 45/13083 (0.3%, 0.3–0.5) | 95/13083 (0.7%, 0.6–0.9) |
+| (c) + IDS monitor | same as (b) | same as (b) | same as (b) | same as (b) |
+
+- **Hard rules don't catch text-only attacks.** They check tools and arguments, so this result
+  is expected.
+- **The deny patterns caught 3.2% of the attacks.** Most Gandalf prompts are generic "ignore
+  your instructions" overrides, which no shipped pack covers.
+- **One pattern caused most false positives.** 38 of the 45 blocked Banking77 queries matched
+  `role_reassignment:be_a_role` on phrases like "will there be a fee". It was not changed after
+  the run.
+- **The IDS (monitor only) did not separate the two sets.** ROC AUC was 0.45.
+- **What the data is and isn't.** Banking77's collection method is undocumented, so these are
+  public banking queries, not real customer traffic. The Gandalf prompts were written against a
+  password-guarding chatbot, not a bank agent.
+
+Full results, per-intent false positives, latency and example misses:
+[`experiment/eval_real_data/results.md`](experiment/eval_real_data/results.md).
+
+**Against an existing detector, on the same items.** This was a separate pre-registered run of
+ProtectAI's open-source prompt-injection classifier (`deberta-v3-base-prompt-injection-v2`,
+Apache-2.0, default threshold):
+
+| System | Attacks caught (1,000) | Banking77 flagged (13,083) | Median time per check |
+|---|---|---|---|
+| rmic-guard (b) | 32 (3.2%) | 45 (0.3%) | 0.03 ms |
+| ProtectAI | 1,000 (100%) | 706 (5.4%) | 23 ms (CPU) |
+| either flags | 1,000 (100%) | 750 (5.7%) | – |
+
+- **ProtectAI is much better at recognising injection wording,** at about 16 times the false
+  alarms on ordinary queries.
+- **rmic-guard does a different job:** it checks tools and arguments, which these text-only
+  attacks never touch. Use the two together.
+- **Caveat:** whether ProtectAI's training data overlaps Gandalf is unknown.
+
+Details: [`experiment/eval_real_data_baselines/results.md`](experiment/eval_real_data_baselines/results.md).
+
+Datasets: Lakera `gandalf_ignore_instructions` (MIT licence) and Banking77 (PolyAI, CC BY 4.0;
+Casanueva et al., "Efficient Intent Detection with Dual Sentence Encoders", NLP4ConvAI 2020).
+Neither is stored in the repository. `python scripts/fetch_real_eval_data.py` downloads both
+from pinned revisions into the git-ignored `data/real_eval/` and checks their SHA-256.
+
 ### Sealing
 
 A sealed contract carries `contract_hash`, a SHA-256 over the canonical JSON of every other
@@ -372,7 +428,7 @@ of this repo.
 | `rmic_guard/_utils/` | Config loading (`config.py`). The SDK reads a config file only when named explicitly via `RMIC_CONFIG`; the research scripts set it to this repo's `config.yaml`. |
 | `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`); `examples/` holds `financial_agent_hardened.json` and `template.json`, a minimal contract to start from (see [`contracts/README.md`](contracts/README.md)). |
 | `prompts/` | The v1 adversarial/legitimate prompt corpus used by the experiment, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`); `v2/` is the per-contract corpus with a frozen tune/held-out split (held-out already used), `v3/` the brief for a future blind test set plus its model-generated secondary set (`v3/generated/`); `external/` the v0.4 external evaluation set built from public datasets. |
-| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), and the v0.4 evaluation (`eval_v0.4/`). |
+| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), the v0.4 evaluation (`eval_v0.4/`), and the evaluation on public real-world data (`eval_real_data/`). |
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
 | `ibm_pilot/` | IBM watsonx Orchestrate integration (adapter, standalone Orchestrate tools, agent YAMLs, `demo.py`, `run_single.py`, tests) — see below. |
