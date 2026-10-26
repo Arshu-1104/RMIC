@@ -349,6 +349,9 @@ def build_report(rows: list[dict], header: str, paraphrases: dict[str, str], smo
     by_id = {r["row_id"]: r for r in _sel(rows, condition="b", dataset="banking77")}
     L += [f"| `{rid}` | {by_id[rid]['intent']} | `{by_id[rid]['reason']}` | "
           f"{paraphrases.get('banking77:' + rid, '(paraphrase pending)')} |" for rid in _examples(fps)]
+    findings = HERE / "findings.md"
+    if findings.exists() and not smoke:
+        L += ["", findings.read_text(encoding="utf-8").strip()]
     L += ["", "## Notes", "",
           "- **Single run, no tuning.** Patterns, thresholds and the contract were fixed in PLAN.md before the run "
           "and were not changed after it.",
@@ -388,8 +391,8 @@ def chart(rows: list[dict], path: Path) -> None:
             a, b = wilson(k, n)
             xs.append(i + (j - 1) * width)
             ys.append(100 * p)
-            lo.append(100 * (p - a))
-            hi.append(100 * (b - p))
+            lo.append(max(0.0, 100 * (p - a)))  # clamp float rounding (e.g. k = 0)
+            hi.append(max(0.0, 100 * (b - p)))
         bars = ax.bar(xs, ys, width, label=label, color=colour, yerr=[lo, hi], capsize=3, error_kw={"lw": 0.8})
         for bar, y in zip(bars, ys):
             ax.annotate(f"{y:.1f}%", (bar.get_x() + bar.get_width() / 2, y), xytext=(0, 3),
