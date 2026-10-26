@@ -300,6 +300,24 @@ intent name. Cells are k/n with a Wilson 95% interval.
 Full results, per-intent false positives, latency and example misses:
 [`experiment/eval_real_data/results.md`](experiment/eval_real_data/results.md).
 
+**Against an existing detector, on the same items.** This was a separate pre-registered run of
+ProtectAI's open-source prompt-injection classifier (`deberta-v3-base-prompt-injection-v2`,
+Apache-2.0, default threshold):
+
+| System | Attacks caught (1,000) | Banking77 flagged (13,083) | Median time per check |
+|---|---|---|---|
+| rmic-guard (b) | 32 (3.2%) | 45 (0.3%) | 0.03 ms |
+| ProtectAI | 1,000 (100%) | 706 (5.4%) | 23 ms (CPU) |
+| either flags | 1,000 (100%) | 750 (5.7%) | – |
+
+- **ProtectAI is much better at recognising injection wording,** at about 16 times the false
+  alarms on ordinary queries.
+- **rmic-guard does a different job:** it checks tools and arguments, which these text-only
+  attacks never touch. Use the two together.
+- **Caveat:** whether ProtectAI's training data overlaps Gandalf is unknown.
+
+Details: [`experiment/eval_real_data_baselines/results.md`](experiment/eval_real_data_baselines/results.md).
+
 Datasets: Lakera `gandalf_ignore_instructions` (MIT licence) and Banking77 (PolyAI, CC BY 4.0;
 Casanueva et al., "Efficient Intent Detection with Dual Sentence Encoders", NLP4ConvAI 2020).
 Neither is stored in the repository. `python scripts/fetch_real_eval_data.py` downloads both

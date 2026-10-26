@@ -77,3 +77,10 @@ model loads and the key works.
 - **Banking77's collection method is undocumented,** so these are public banking queries, not
   real customer traffic.
 - **Data sharing.** Sending the texts to Lakera shares public dataset text with a third party.
+
+## Deviation (recorded 2026-10-26, after the run)
+
+Lakera Guard was dropped. Its API quota ran out (`ErrQuotaExceeded`) after 334 of the planned
+4,080 calls, all Gandalf prompts and none from Banking77. At the authors' request, those
+partial results were discarded and are not reported, and the Lakera code was removed. Only
+ProtectAI was evaluated, as planned above.
