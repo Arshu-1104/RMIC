@@ -78,6 +78,19 @@ network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1
 embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
 comes into play.
 
+### What each decision does
+
+Only `PASS`, `PREEMPTIVE_WARN` and `CONFIRMED` run the tool. `BLOCK`, `NEEDS_RECOVERY` and
+`NEEDS_CONFIRMATION` don't. `PREEMPTIVE_WARN` (with `semantic=True`) flags a call and still runs
+it, so count executed calls, not "blocked or flagged" ones. In `semantic="monitor"` mode the IDS
+never stops a call.
+
+Tools registered with a `Guard` can only run through its enforcement engine, and every decision
+is written to the signed audit log. The library can't stop code that calls a tool function
+directly, so route all tool execution through the `Guard`.
+
+Table, limits and tests: [`docs/execution_semantics.md`](docs/execution_semantics.md).
+
 ### Contract hard-rule extensions (v0.4)
 
 Four optional contract fields tighten the hard rules (`session_limits` since 0.4.1). They are
