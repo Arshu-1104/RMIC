@@ -631,7 +631,27 @@ class TestHardenedAccountPattern:
             assert r.reason == f"argument_pattern:transfer_funds:{arg}", (arg, account)
 
     @pytest.mark.parametrize(
-        "account", ["4321", "1234567890", "account ending in 4321", "chk-1234", "user_account", "Alice Smith", "landlord"]
+        "account",
+        # Passed in 0.4.1: the IBAN was rejected only at the start of the value.
+        ["IBAN GB29NWBK60161331926819", "IBAN GB29 NWBK 6016 1331 9268 19", "GB29  NWBK 6016 1331 9268 19",
+         "Attacker GB29NWBK60161331926819", "send to DE89 3704 0044 0532 0130 00", "Mr x US133000000121212121212"],
+    )
+    def test_ibans_inside_a_label_are_rejected(self, account: str) -> None:
+        guard = Guard(load_example_contract("financial_agent_hardened"))
+        for arg in ("to_account", "recipient_account", "account_number"):
+            r = guard.check("transfer_funds", amount=50, arguments={arg: account})
+            assert r.reason == f"argument_pattern:transfer_funds:{arg}", (arg, account)
+
+    def test_hardened_contract_version_and_hash(self) -> None:
+        c = load_example_contract("financial_agent_hardened")
+        assert c.contract_version == "1.3.0"
+        assert c.contract_hash == "a246692eb3b5a4bc52df27c444146a1ed94c4b7638029bc25c1d080dcb88f301"
+        assert c.anchor_embedding == load_example_contract("financial_agent").anchor_embedding
+
+    @pytest.mark.parametrize(
+        "account",
+        ["4321", "1234567890", "account ending in 4321", "chk-1234", "user_account", "Alice Smith", "landlord",
+         "account 12345678", "123456789012345678", "sav-9876", "joint-5678", "card-0001", "O'Brien", "Landlord Rent"],
     )
     def test_allowed_account_forms_still_pass(self, account: str) -> None:
         guard = Guard(load_example_contract("financial_agent_hardened"))

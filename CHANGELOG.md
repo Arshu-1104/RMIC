@@ -20,6 +20,17 @@ All notable changes to `rmic-guard` are documented here.
   the names it lists. A different name altogether (`amt`, `transferAmount`) is still not
   matched; list the tool's arguments in `allowed_args` to block unknown names.
 
+### Changed
+
+- **`financial_agent_hardened`** (example contract, `contract_version` 1.3.0, new
+  `contract_hash` `a246692eb3b5a4bc52df27c444146a1ed94c4b7638029bc25c1d080dcb88f301`): the
+  account patterns rejected an IBAN only at the start of the value, so
+  `"IBAN GB29NWBK60161331926819"`, `"Attacker GB29…"` or an IBAN with double spaces passed.
+  They now reject an IBAN-shaped run (2 letters, 2 check digits, 11–30 alphanumerics with any
+  spacing) anywhere in the value. Every account form accepted before is still accepted. The
+  `anchor_embedding` is unchanged (hash recomputed, anchors not re-embedded); the research
+  contracts are unchanged.
+
 ## 0.4.1 — 2026-10-22
 
 ### Added

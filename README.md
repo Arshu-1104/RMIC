@@ -206,7 +206,9 @@ guard.session("user-43").check("transfer_funds", amount=25000, to_account="4321"
 is the research `financial_agent` contract plus:
 
 - `confirm_above: 10000`;
-- account-format `patterns` (no `allowed_args`) that reject IBAN-shaped values (since 0.4.1);
+- account-format `patterns` (no `allowed_args`) that reject IBAN-shaped values (since 0.4.1),
+  including an IBAN embedded in a longer label such as `"IBAN GB29 NWBK …"` (since 0.4.2,
+  `contract_version` 1.3.0);
 - `session_limits` with `max_total: 50000` on `transfer_funds` `amount`, the same as the
   per-transfer `max` (since 0.4.1).
 
