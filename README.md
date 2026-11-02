@@ -174,6 +174,9 @@ to that point, and the result carries the warning `deny_pattern_scan_truncated:1
 > attacks per contract. Both estimates are optimistic, because the same person wrote the
 > `prompts/v2` attacks and the patterns (see `experiment/hard_rule_gaps/implemented_rules_tune.md`).
 > They are off in every bundled contract. Treat them as a cheap extra layer, not as protection.
+> Since 0.4.2 `be_a_role` and `act_as` match command phrasing only ("be my lawyer", "act as a
+> pharmacist"), not ordinary questions ("will there be a fee?"): on 13,083 Banking77 queries the
+> three packs now block 6 instead of 45, with the same attacks caught on the tune split.
 
 **`session_limits`: a running total per session.** Splitting one large transfer into many
 small ones gets past `max` and `confirm_above`, which look at one call at a time. A session

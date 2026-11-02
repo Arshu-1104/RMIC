@@ -70,10 +70,14 @@ DENY_PATTERN_PACKS: dict[str, dict[str, str]] = {
         "you_are_a_role_now": r"\byou(?:'re| are) (?:a|an|the) [\w-]+(?: [\w-]+)? now\b",
         "from_now_on": r"\bfrom now on\b",
         "switch_roles": r"\bswitch(?:ing)? roles?\b",
-        "act_as": r"\b(?:act|behave|talk|respond|answer)(?: to me)? (?:as|like)\b",
+        # Not followed by a non-role continuation ("an answer as to why", "respond as soon as").
+        "act_as": r"\b(?:act|behave|talk|respond|answer)(?: to me)? (?:as|like)\b(?! (?:to|if|soon|well|much|usual|normal|expected|possible|quickly|fast)\b)",
         "pretend": r"\bpretend(?:ing)? (?:to be|you(?:'re| are))\b",
         "roleplay": r"\brole-?play\b",
-        "be_a_role": r"\bbe (?:my|a|an) [\w-]+",
+        # Imperative position only (start of a clause, or after please/just/so/can you ...):
+        # "be a gossip", "so be my doctor". Before 0.4.2 it matched anywhere, so
+        # "will there be a fee" or "should be a bit higher" were blocked.
+        "be_a_role": r"(?:^|[.!?;:,]\s*|\b(?:please|just|now|and|so|then|you|can you|could you|will you|would you)\s+)be (?:my|a|an) [\w-]+",
         "drop_persona": r"\bdrop the [\w-]+ (?:persona|act)\b",
         "as_my_role": r"\bas (?:my|your) (?:[\w-]+ ){0,2}(?:advisor|adviser|accountant|attorney|counsel|lawyer|therapist|buddy|friend|doctor|self)\b",
     },
