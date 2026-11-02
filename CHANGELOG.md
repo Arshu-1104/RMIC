@@ -4,6 +4,22 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- **Non-finite and boolean values no longer pass numeric limits.** `amount=float("nan")`,
+  `"nan"`, `inf` and `-inf` passed `min`, `max` and `confirm_above`, because every comparison
+  with NaN is false. They now block with `parameter_constraint:<name>:not_finite`. Booleans
+  (which Python treats as 1 and 0) block with `parameter_constraint:<name>:not_numeric`. An
+  infinite value for an `int` constraint used to raise `OverflowError`; it now blocks.
+- **Renaming an argument no longer skips its rules.** `parameter_constraints`, `confirm_above`,
+  `session_limits` and `argument_rules` looked arguments up by exact name, so `Amount=999999`
+  or `AMOUNT=999999` passed every limit on `amount`, including in `financial_agent_hardened`.
+  Argument names are now matched like tool names, ignoring case, surrounding whitespace, inner
+  spaces and hyphens. Every matching argument is checked (`amount=10, Amount=999999` blocks),
+  and all of them count toward a session total. `allowed_args` accepts the same spellings of
+  the names it lists. A different name altogether (`amt`, `transferAmount`) is still not
+  matched; list the tool's arguments in `allowed_args` to block unknown names.
+
 ## 0.4.1 — 2026-10-22
 
 ### Added

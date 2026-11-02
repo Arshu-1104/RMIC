@@ -12,6 +12,7 @@ are capped in number (oldest evicted first) and can be listed or cancelled.
 
 from __future__ import annotations
 
+import math
 import secrets
 import threading
 import time
@@ -29,6 +30,7 @@ from rmic_guard._core.hard_rules import (
     check_session_limits,
     confirmation_reason,
     deny_pattern_matches,
+    matching_argument_values,
 )
 from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
@@ -80,27 +82,41 @@ class EnforcementOutcome:
 
 
 def _numeric_for_type(val: Any, value_type: str) -> float:
+    """The constrained value as a float. Raises TypeError/ValueError if it is
+    not a number (booleans included), and ValueError("not_finite") for NaN and
+    infinities, which compare False against every bound."""
+    if isinstance(val, bool):
+        raise TypeError("a boolean is not a number")
+    v = float(val)
+    if not math.isfinite(v):
+        raise ValueError("not_finite")
     if value_type == "int":
-        return float(int(val))
-    return float(val)
+        try:
+            return float(int(val))
+        except OverflowError as exc:  # pragma: no cover - unreachable after the finite check
+            raise ValueError("not_finite") from exc
+    return v
 
 
 def _check_parameter_constraints(
     contract: RMICContract,
     arguments: dict[str, Any],
 ) -> str | None:
+    """Bounds apply to every argument whose name matches the constraint's,
+    ignoring case, spaces and hyphens (Amount, AMOUNT and "amount" are all
+    "amount"), so renaming an argument does not skip its bounds."""
     by_name = contract.constraints_by_name()
     for name, spec in by_name.items():
-        if name not in arguments:
-            continue
-        try:
-            v = _numeric_for_type(arguments[name], spec.value_type)
-        except (TypeError, ValueError):
-            return f"parameter_constraint:{name}:not_numeric"
-        if spec.max is not None and v > float(spec.max):
-            return f"parameter_constraint:{name}:above_max"
-        if spec.min is not None and v < float(spec.min):
-            return f"parameter_constraint:{name}:below_min"
+        for value in matching_argument_values(arguments, name):
+            try:
+                v = _numeric_for_type(value, spec.value_type)
+            except (TypeError, ValueError) as exc:
+                kind = "not_finite" if str(exc) == "not_finite" else "not_numeric"
+                return f"parameter_constraint:{name}:{kind}"
+            if spec.max is not None and v > float(spec.max):
+                return f"parameter_constraint:{name}:above_max"
+            if spec.min is not None and v < float(spec.min):
+                return f"parameter_constraint:{name}:below_min"
     return None
 
 

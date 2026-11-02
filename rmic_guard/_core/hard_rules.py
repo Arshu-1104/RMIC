@@ -48,6 +48,8 @@ __all__ = [
     "check_session_limits",
     "confirmation_reason",
     "deny_pattern_matches",
+    "matching_argument_values",
+    "normalize_argument_name",
     "parse_argument_rules",
     "parse_deny_patterns",
     "parse_session_limits",
@@ -94,6 +96,21 @@ DENY_PATTERN_PACKS: dict[str, dict[str, str]] = {
 def _normalize_tool_name(name: str) -> str:
     """Same matching rule as the forbidden/allowed tool checks."""
     return (name or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def normalize_argument_name(name: Any) -> str:
+    """Argument names are matched like tool names: case, surrounding
+    whitespace, inner spaces and hyphens are ignored ("Amount", "AMOUNT",
+    "to-account" and "to account" match "amount" / "to_account")."""
+    return _normalize_tool_name(str(name))
+
+
+def matching_argument_values(arguments: Mapping[str, Any], name: str) -> list[Any]:
+    """Every value in ``arguments`` whose name matches ``name`` (see
+    normalize_argument_name). Several can match, e.g. both "amount" and
+    "Amount"; rules check each of them."""
+    target = normalize_argument_name(name)
+    return [value for key, value in arguments.items() if normalize_argument_name(key) == target]
 
 
 def _canonical(value: Any) -> str:
@@ -216,12 +233,14 @@ def check_argument_rules(rules: tuple[ArgumentRule, ...], tool_name: str, argume
         if _normalize_tool_name(rule.tool) != planned:
             continue
         if rule.allowed_args is not None:
+            allowed = {normalize_argument_name(a) for a in rule.allowed_args}
             for arg in arguments:
-                if arg not in rule.allowed_args:
+                if normalize_argument_name(arg) not in allowed:
                     return f"argument_not_allowed:{rule.tool}:{arg}"
         for arg, pattern in rule.patterns:
-            if arg in arguments and not _value_matches(arguments[arg], pattern, rule.max_length):
-                return f"argument_pattern:{rule.tool}:{arg}"
+            for value in matching_argument_values(arguments, arg):
+                if not _value_matches(value, pattern, rule.max_length):
+                    return f"argument_pattern:{rule.tool}:{arg}"
     return None
 
 
@@ -255,14 +274,15 @@ def confirmation_reason(constraints: Any, arguments: Mapping[str, Any]) -> str |
     Runs after the hard limits, so values here are already numeric and within min/max.
     """
     for c in constraints:
-        if c.confirm_above is None or c.name not in arguments:
+        if c.confirm_above is None:
             continue
-        try:
-            value = float(arguments[c.name])
-        except (TypeError, ValueError):
-            continue
-        if value > float(c.confirm_above):
-            return f"confirm_above:{c.name}"
+        for raw in matching_argument_values(arguments, c.name):
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > float(c.confirm_above):
+                return f"confirm_above:{c.name}"
     return None
 
 
@@ -352,12 +372,15 @@ def check_session_limits(
     lower the total."""
     planned = _normalize_tool_name(tool_name)
     for limit in limits:
-        if _normalize_tool_name(limit.tool) != planned or limit.param not in arguments:
+        if _normalize_tool_name(limit.tool) != planned:
             continue
-        amount = _amount(arguments[limit.param])
-        if amount is None:
+        values = matching_argument_values(arguments, limit.param)
+        if not values:
+            continue
+        amounts = [_amount(v) for v in values]
+        if any(a is None for a in amounts):
             return f"{limit.reason}:invalid_value"
-        if totals.get(limit.key, 0.0) + amount > limit.max_total:
+        if totals.get(limit.key, 0.0) + sum(amounts) > limit.max_total:  # type: ignore[arg-type]
             return limit.reason
     return None
 
@@ -369,8 +392,10 @@ def session_limit_amounts(
     planned = _normalize_tool_name(tool_name)
     added: dict[str, float] = {}
     for limit in limits:
-        if _normalize_tool_name(limit.tool) == planned and limit.param in arguments:
-            amount = _amount(arguments[limit.param])
+        if _normalize_tool_name(limit.tool) != planned:
+            continue
+        for value in matching_argument_values(arguments, limit.param):
+            amount = _amount(value)
             if amount is not None:
                 added[limit.key] = added.get(limit.key, 0.0) + amount
     return added
