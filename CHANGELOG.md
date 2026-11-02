@@ -4,6 +4,18 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+### Added
+
+- **`unlisted_tools`** (optional contract field, `"block"` or `"confirm"`, validated at load,
+  covered by the contract hash). With `"confirm"`, a tool that is in neither `allowed_actions`
+  nor `forbidden_actions` returns `NEEDS_CONFIRMATION` (reason `unlisted_tool:<name>`) instead of
+  `BLOCK tool_not_allowed`; it runs only after `guard.confirm()`. Forbidden tools still block,
+  and all other hard rules still apply. The default is unchanged; no bundled contract enables
+  it. Also accepted by `RMICContract.create(unlisted_tools=...)` and in the JSON schema.
+  - In the v0.4 external evaluation, at most 24 of the 56 blocked legitimate items, and at most
+    22 of the 72 blocked attacks, were blocked only for this reason (read from
+    `experiment/eval_v0.4/turns.csv`, not a new run): `"confirm"` sends both to a human.
+
 ### Fixed
 
 - **Non-finite and boolean values no longer pass numeric limits.** `amount=float("nan")`,

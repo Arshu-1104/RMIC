@@ -80,7 +80,7 @@ comes into play.
 
 ### Contract hard-rule extensions (v0.4)
 
-Four optional contract fields tighten the hard rules (`session_limits` since 0.4.1). They are
+Four optional contract fields tighten the hard rules (`session_limits` since 0.4.1), and a fifth, `unlisted_tools` (since 0.4.2), can relax one. They are
 validated when the contract is loaded (an invalid regex is rejected), covered by the contract
 hash, and contracts without them behave exactly as before.
 
@@ -204,6 +204,29 @@ guard.session("user-43").check("transfer_funds", amount=25000, to_account="4321"
 - Totals live in memory, one per session id. `session.reset()` clears them, and they don't
   survive a restart. Each session id must stand for one end user: a caller who can pick a fresh
   session id gets a fresh total.
+
+**`unlisted_tools`: ask a human instead of blocking an unknown tool (since 0.4.2).** With an
+`allowed_actions` list, a tool that is on neither list is blocked as `tool_not_allowed`. That is
+the main source of false positives when an agent's real tools don't all appear in its contract.
+`"unlisted_tools": "confirm"` turns those calls into `NEEDS_CONFIRMATION` (reason
+`unlisted_tool:<name>`). The tool runs only after `guard.confirm(id)`, exactly once, and both
+steps are audited.
+
+```json
+"unlisted_tools": "confirm"
+```
+
+- Forbidden tools still block, and every other hard rule (bounds, argument rules, data scope,
+  session limits, deny patterns) still applies to the unlisted call.
+- The default (field absent, or `"block"`) is unchanged, and no bundled contract enables it.
+- **It moves work to a human; it does not decide for them.** In the v0.4 external evaluation
+  (`experiment/eval_v0.4/turns.csv`, condition (a)), 24 of the 56 legitimate items that were
+  blocked were stopped only because their tool was unlisted, and so were 22 of the 72 attacks
+  that were blocked. With `"confirm"`, at most those 24 legitimate items and those 22 attacks
+  would wait for confirmation instead of being blocked. These counts are read from the
+  committed per-call decisions, not from a new run. They are upper bounds, because a call that
+  also broke another rule would still be blocked. Use it only where someone reviews
+  confirmations.
 
 `contracts/examples/financial_agent_hardened.json` (`load_example_contract("financial_agent_hardened")`)
 is the research `financial_agent` contract plus:

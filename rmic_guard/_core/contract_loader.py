@@ -135,6 +135,9 @@ class RMICContract:
     confirmation_ttl_seconds: float | None = None
     # Per-session running totals (v0.4.1); the totals themselves live in GuardSession.
     session_limits: tuple[SessionLimit, ...] = ()
+    # What happens to a tool that is neither allowed nor forbidden (v0.4.2):
+    # None / "block" -> BLOCK tool_not_allowed; "confirm" -> NEEDS_CONFIRMATION.
+    unlisted_tools: str | None = None
 
     def constraints_by_name(self) -> dict[str, ParameterConstraint]:
         return {c.name: c for c in self.parameter_constraints}
@@ -179,6 +182,8 @@ class RMICContract:
             d["confirmation_ttl_seconds"] = self.confirmation_ttl_seconds
         if self.session_limits:
             d["session_limits"] = {s.tool: json.loads(s.raw_json) for s in self.session_limits}
+        if self.unlisted_tools is not None:
+            d["unlisted_tools"] = self.unlisted_tools
         if self.anchor_embedding:
             d["anchor_embedding"] = list(self.anchor_embedding)
         return d
@@ -268,6 +273,7 @@ def _contract_from_dict(data: dict[str, Any], *, require_hash_match: bool, sourc
         session_limits=parse_session_limits(
             data.get("session_limits"), allowed_actions=_as_tuple_str(data.get("allowed_actions"))
         ),
+        unlisted_tools=data.get("unlisted_tools"),
     )
 
 
@@ -411,6 +417,7 @@ def create_contract(
     deny_patterns: Mapping[str, Any] | None = None,
     confirmation_ttl_seconds: float | None = None,
     session_limits: Mapping[str, Mapping[str, Any]] | None = None,
+    unlisted_tools: str | None = None,
     save_to: str | Path | None = None,
     model_name: str | None = None,
     require_embedding: bool = True,
@@ -478,6 +485,8 @@ def create_contract(
         data["confirmation_ttl_seconds"] = confirmation_ttl_seconds
     if session_limits is not None:
         data["session_limits"] = json.loads(json.dumps(session_limits))
+    if unlisted_tools is not None:
+        data["unlisted_tools"] = unlisted_tools
 
     validate_contract_dict(data, source="RMICContract.create(...)")
 

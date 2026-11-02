@@ -222,6 +222,8 @@ def validate_contract_dict(data: Mapping[str, Any], *, source: str | None = None
             allowed_actions=tuple(allowed) if _is_str_list(allowed) else (),
             problems=problems,
         )
+    if data.get("unlisted_tools") is not None and data["unlisted_tools"] not in ("block", "confirm"):
+        problems.append(f"unlisted_tools: must be \"block\" or \"confirm\", got {data['unlisted_tools']!r}")
     if data.get("confirmation_ttl_seconds") is not None:
         ttl = data["confirmation_ttl_seconds"]
         if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 0 < ttl < float("inf"):

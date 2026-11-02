@@ -142,7 +142,7 @@ def _check_hard_rules(
 
     if planned in forbidden_norm:
         return "forbidden_tool"
-    if allowed_norm and planned not in allowed_norm:
+    if allowed_norm and planned not in allowed_norm and contract.unlisted_tools != "confirm":
         return "tool_not_allowed"
     ar = check_argument_rules(contract.argument_rules, plan.tool_name, plan.arguments)
     if ar:
@@ -158,6 +158,18 @@ def _check_hard_rules(
         return ds
     blocked, _ = deny_pattern_matches(contract.deny_patterns, _deny_text(plan))
     return blocked
+
+
+def _unlisted_tool_reason(contract: RMICContract, plan: PlannedToolCall) -> str | None:
+    """'unlisted_tool:<name>' when the contract sends tools outside allowed_actions
+    to confirmation (unlisted_tools: "confirm") and this is one. Forbidden tools
+    never get here: they block first."""
+    if contract.unlisted_tools != "confirm" or not contract.allowed_actions:
+        return None
+    allowed_norm = {_normalize_tool_name(a) for a in contract.allowed_actions}
+    if _normalize_tool_name(plan.tool_name) in allowed_norm:
+        return None
+    return f"unlisted_tool:{plan.tool_name}"
 
 
 def _deny_text(plan: PlannedToolCall) -> str:
@@ -329,7 +341,9 @@ class EnforcementEngine:
         if enforcement_mode == "ids_only":  # hard rules (and these extensions) are skipped
             return None, None, ()
         _, warnings = deny_pattern_matches(self.contract.deny_patterns, _deny_text(plan))
-        reason = confirmation_reason(self.contract.parameter_constraints, plan.arguments)
+        reason = _unlisted_tool_reason(self.contract, plan) or confirmation_reason(
+            self.contract.parameter_constraints, plan.arguments
+        )
         if reason is None:
             return None, None, warnings
         confirmation_id = secrets.token_urlsafe(16)
