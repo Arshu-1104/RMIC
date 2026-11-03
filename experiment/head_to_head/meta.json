@@ -1,0 +1,46 @@
+{
+ "latency": {
+  "rmic": {
+   "median_ms": 0.03437999998823216,
+   "p95_ms": 0.0719170000138547,
+   "n": 13639
+  },
+  "agentspec": {
+   "median_ms": 0.7798939999474896,
+   "p95_ms": 1.0495149999769637,
+   "n": 13639
+  },
+  "progent": {
+   "median_ms": 0.06888299992624525,
+   "p95_ms": 0.725340000030883,
+   "n": 13639
+  }
+ },
+ "sizes": {
+  "financial_agent": {
+   "rmic": 69,
+   "agentspec": 230,
+   "progent": 58
+  },
+  "financial_agent_hardened": {
+   "rmic": 106,
+   "agentspec": 130,
+   "progent": 154
+  },
+  "healthcare_research_agent": {
+   "rmic": 66,
+   "agentspec": 180,
+   "progent": 86
+  },
+  "legal_review_agent": {
+   "rmic": 63,
+   "agentspec": 295,
+   "progent": 58
+  },
+  "support_agent": {
+   "rmic": 48,
+   "agentspec": 95,
+   "progent": 26
+  }
+ }
+}

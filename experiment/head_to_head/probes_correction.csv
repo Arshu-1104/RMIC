@@ -1,0 +1,3 @@
+probe,system,outcome,reason
+tool_name_case,agentspec,executed,
+unknown_tool,agentspec,executed,

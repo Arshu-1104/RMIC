@@ -516,12 +516,23 @@ def report(item_rows: list[dict], turn_rows: list[dict], meta: dict, probe_rows:
         by.setdefault(r["probe"], {})[r["system"]] = f"{r['outcome']}" + (f" ({r['reason'][:60]})" if r["reason"] else "")
     for pid, v in by.items():
         L.append(f"| `{pid}` | " + " | ".join(v[s] for s in SYSTEMS) + " |")
+    corr = HERE / "probes_correction.csv"
+    if corr.exists():
+        L += ["", "**Correction after the run.** The plan's `unknown_tool` probe uses a tool *outside* the agent's "
+              "tool set, but the run added `wire_money` and `Transfer_Funds` to AgentSpec's tool set, so it wrote deny "
+              "rules for them. Re-run as planned (tool set = the contract's allowed and forbidden tools), AgentSpec "
+              "gives:", "", "| Probe | AgentSpec, as planned |", "|---|---|"]
+        for r in read_csv(corr):
+            L.append(f"| `{r['probe']}` | {r['outcome']}{' (' + r['reason'] + ')' if r['reason'] else ''} |")
+        L += ["", "AgentSpec rules fire on a tool's exact name and it has no deny-by-default, so a tool it has no rule "
+              "for runs unchecked. In a LangChain agent, a name that is not one of the agent's tools is rejected by "
+              "the agent itself rather than executed."]
     L += ["", "## Cost", "", "| Framework | Median per check (ms) | p95 (ms) | Checks |", "|---|---|---|---|"]
     for s in SYSTEMS:
         m = meta["latency"][s]
         L.append(f"| {NAMES[s]} | {m['median_ms']:.3f} | {m['p95_ms']:.3f} | {m['n']} |")
-    L += ["", "Policy size in lines (rmic-guard: contract JSON without the embedding; AgentSpec: rule text, plus "
-          "one Python predicate function per rule kind; Progent: policy JSON):", "",
+    L += ["", "Policy size in lines (rmic-guard: contract JSON without the embedding; AgentSpec: rule text only, "
+          "not counting the four Python predicate functions it calls; Progent: policy JSON):", "",
           "| Contract | rmic-guard | AgentSpec | Progent |", "|---|---|---|---|"]
     for c, v in meta["sizes"].items():
         L.append(f"| `{c}` | {v['rmic']} | {v['agentspec']} | {v['progent']} |")

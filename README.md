@@ -649,6 +649,11 @@ once; no tuning):
   banking queries completed under the hard rules (none blocked; 0.7% sent for confirmation).
   The rules stopped none of 1,000 text-only injection prompts, which an open-source classifier
   (ProtectAI) detects at 97.7% with 1% false positives. The two are complements.
+- **Head-to-head with AgentSpec and Progent** (`experiment/head_to_head/`): with each contract
+  written in their policy languages, all three made the same decision on all 15,317 items.
+  The role contract is a convenient packaging of rules either framework can enforce, not
+  extra enforcement power. They differ on edge cases (renamed arguments, NaN amounts, session
+  totals, unlisted tools), listed in `findings.md`.
 - **Semantic IDS:** ROC AUC 0.45–0.59 on every set. It stays off by default, and
   `semantic="monitor"` records it without enforcing.
 
