@@ -78,6 +78,19 @@ network. With `semantic=True`, the first use downloads the `BAAI/bge-small-en-v1
 embedding model once (cached afterwards), and `run()`'s `NEEDS_RECOVERY` re-planning
 comes into play.
 
+### What each decision does
+
+Only `PASS`, `PREEMPTIVE_WARN` and `CONFIRMED` run the tool. `BLOCK`, `NEEDS_RECOVERY` and
+`NEEDS_CONFIRMATION` don't. `PREEMPTIVE_WARN` (with `semantic=True`) flags a call and still runs
+it, so count executed calls, not "blocked or flagged" ones. In `semantic="monitor"` mode the IDS
+never stops a call.
+
+Tools registered with a `Guard` can only run through its enforcement engine, and every decision
+is written to the signed audit log. The library can't stop code that calls a tool function
+directly, so route all tool execution through the `Guard`.
+
+Table, limits and tests: [`docs/execution_semantics.md`](docs/execution_semantics.md).
+
 ### Contract hard-rule extensions (v0.4)
 
 Four optional contract fields tighten the hard rules (`session_limits` since 0.4.1), and a fifth, `unlisted_tools` (since 0.4.2), can relax one. They are
@@ -295,6 +308,62 @@ How to read it:
   `run_eval.py --verify` rebuild and check the full set. Attribution and licence texts:
   [`prompts/external/README.md`](prompts/external/README.md).
 
+### Evaluation on public real-world data
+
+One pre-registered run ([plan](experiment/eval_real_data/PLAN.md), committed first), with no
+tuning:
+- **Attacks:** 1,000 prompt-injection attempts written by players of Lakera's Gandalf game.
+- **Ordinary requests:** 13,083 public online-banking queries from Banking77.
+- **Contract:** `financial_agent_hardened`.
+
+The attacks are text only, so each was sent with an allowed, in-limit action (a $500 transfer,
+and separately a balance check). Each Banking77 query was paired with a tool chosen from its
+intent name. Cells are k/n with a Wilson 95% interval.
+
+| Condition | Attacks blocked (all 1,000) | Attacks blocked (test split, 112) | Banking77 blocked | Banking77 sent for confirmation |
+|---|---|---|---|---|
+| (a) hard rules | 0/1000 (0.0%, 0.0–0.4) | 0/112 (0.0%, 0.0–3.3) | 0/13083 (0.0%, 0.0–0.0) | 95/13083 (0.7%, 0.6–0.9) |
+| (b) + deny patterns | 32/1000 (3.2%, 2.3–4.5) | 2/112 (1.8%, 0.5–6.3) | 45/13083 (0.3%, 0.3–0.5) | 95/13083 (0.7%, 0.6–0.9) |
+| (c) + IDS monitor | same as (b) | same as (b) | same as (b) | same as (b) |
+
+- **Hard rules don't catch text-only attacks.** They check tools and arguments, so this result
+  is expected.
+- **The deny patterns caught 3.2% of the attacks.** Most Gandalf prompts are generic "ignore
+  your instructions" overrides, which no shipped pack covers.
+- **One pattern caused most false positives.** 38 of the 45 blocked Banking77 queries matched
+  `role_reassignment:be_a_role` on phrases like "will there be a fee". It was not changed after
+  the run.
+- **The IDS (monitor only) did not separate the two sets.** ROC AUC was 0.45.
+- **What the data is and isn't.** Banking77's collection method is undocumented, so these are
+  public banking queries, not real customer traffic. The Gandalf prompts were written against a
+  password-guarding chatbot, not a bank agent.
+
+Full results, per-intent false positives, latency and example misses:
+[`experiment/eval_real_data/results.md`](experiment/eval_real_data/results.md).
+
+**Against an existing detector, on the same items.** This was a separate pre-registered run of
+ProtectAI's open-source prompt-injection classifier (`deberta-v3-base-prompt-injection-v2`,
+Apache-2.0, default threshold):
+
+| System | Attacks caught (1,000) | Banking77 flagged (13,083) | Median time per check |
+|---|---|---|---|
+| rmic-guard (b) | 32 (3.2%) | 45 (0.3%) | 0.03 ms |
+| ProtectAI | 1,000 (100%) | 706 (5.4%) | 23 ms (CPU) |
+| either flags | 1,000 (100%) | 750 (5.7%) | – |
+
+- **ProtectAI is much better at recognising injection wording,** at about 16 times the false
+  alarms on ordinary queries.
+- **rmic-guard does a different job:** it checks tools and arguments, which these text-only
+  attacks never touch. Use the two together.
+- **Caveat:** whether ProtectAI's training data overlaps Gandalf is unknown.
+
+Details: [`experiment/eval_real_data_baselines/results.md`](experiment/eval_real_data_baselines/results.md).
+
+Datasets: Lakera `gandalf_ignore_instructions` (MIT licence) and Banking77 (PolyAI, CC BY 4.0;
+Casanueva et al., "Efficient Intent Detection with Dual Sentence Encoders", NLP4ConvAI 2020).
+Neither is stored in the repository. `python scripts/fetch_real_eval_data.py` downloads both
+from pinned revisions into the git-ignored `data/real_eval/` and checks their SHA-256.
+
 ### Sealing
 
 A sealed contract carries `contract_hash`, a SHA-256 over the canonical JSON of every other
@@ -400,7 +469,7 @@ of this repo.
 | `rmic_guard/_utils/` | Config loading (`config.py`). The SDK reads a config file only when named explicitly via `RMIC_CONFIG`; the research scripts set it to this repo's `config.yaml`. |
 | `contracts/` | Sealed JSON identity contracts for the 4 agent roles (`financial_agent`, `support_agent`, `healthcare_research_agent`, `legal_review_agent`); `examples/` holds `financial_agent_hardened.json` and `template.json`, a minimal contract to start from (see [`contracts/README.md`](contracts/README.md)). |
 | `prompts/` | The v1 adversarial/legitimate prompt corpus used by the experiment, one JSON file per drift category (`role_drift`, `goal_drift`, `persona_drift`, `permission_drift`, `data_scope_drift`, `legitimate`); `v2/` is the per-contract corpus with a frozen tune/held-out split (held-out already used), `v3/` the brief for a future blind test set plus its model-generated secondary set (`v3/generated/`); `external/` the v0.4 external evaluation set built from public datasets. |
-| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), and the v0.4 evaluation (`eval_v0.4/`). |
+| `experiment/` | The research experiment runner (`runner.py`), metrics computation (`metrics.py`), SQLite results store with CSV/JSON/Excel export (`results_store.py`), statistical significance testing (`statistical_tests.py`), adversarial prompt generation (`adversarial.py`), IDS threshold-calibration diagnostics (`ids_calibration_investigation/`), the hard-rule gap analysis and evaluation of the v0.4 rules (`hard_rule_gaps/`), IDS latency measurements (`perf/`), the v0.4 evaluation (`eval_v0.4/`), and the evaluation on public real-world data (`eval_real_data/`). |
 | `baselines/` | Head-to-head comparisons against Lakera Guard, NeMo Guardrails, and AgentDojo, plus diagnostic/calibration scripts — see [`baselines/README.md`](baselines/README.md). |
 | `dashboard/` | FastAPI results dashboard (`app.py`) with a static frontend (`frontend/index.html`). |
 | `ibm_pilot/` | IBM watsonx Orchestrate integration (adapter, standalone Orchestrate tools, agent YAMLs, `demo.py`, `run_single.py`, tests) — see below. |
@@ -536,43 +605,65 @@ drift attempts, plus legitimate/benign controls).
 
 ## Results
 
-The original RMIC-Guard experiment — 4 LLMs (claude-sonnet-4-6, claude-haiku-4-5,
-llama-3.3-70b-versatile, llama-3.1-8b-instant), 4 agent roles, 5,212 API calls across two full
-runs — is written up in:
+The original RMIC-Guard experiment (May–July 2026; 4 LLM configurations: claude-sonnet-4-6,
+claude-haiku-4-5 and groq/llama-3.3-70b-versatile + llama-3.1-8b-instant; 4 agent roles; 5
+drift categories; 5,338 logged evaluations in the full-mode runs) is written up in:
 
-> **"Role Model Identity Contract Enforcement as a Structural Determinant of Identity
-> Drift Suppression in Autonomous LLM Agents"** — Sahana B, Charithra H S, Arshitha S,
-> Chandrakala, Neethu B Krishna, Soumya Prasada, Bhanupriya P, Aryaman Tiwary —
-> submitted to *International Journal of Electrical and Computer Engineering (IJECE)*.
+> **"RMIC-GUARD: Runtime Enforcement of Role Identity Contracts for Suppressing Identity Drift
+> in Autonomous LLM Agents"**: Sahana B, Arshitha S, Charithra H S, Chandrakala, Neethu B
+> Krishna, Soumya Prasada, Bhanupriya P, Aryaman Tiwary. *Journal of Advances in Information
+> Technology* (JAIT), manuscript 24005, under revision.
 
-**Headline finding:** external middleware enforcement (Condition C) reached DSR 0.952–
-1.000 across all four models, while the best prompt-only condition (B) reached only DSR
-0.391 (weakest model: 0.020) — a result that holds regardless of model architecture or
-capability tier (χ²(3) = 847.3, p < 0.0001; Cohen's d = 1.84 for Base IDS, C vs. B).
+**What the original experiment shows** (Table III of the revised manuscript). In these runs
+"DSR" counts adversarial prompts that were *blocked or flagged* (BLOCK, NEEDS_RECOVERY or
+PREEMPTIVE_WARN for C1/C2/C; a refusal for B), so it measures detection, not prevention, and
+tools were not executed.
 
-**Ablation:** hard rules alone (C1) suppress drift (DSR ≈ 1.000) but at a steep false-positive
-cost (FPR 0.62–0.67). Semantic IDS alone (C2) cannot issue terminal blocks without a hard-
-rule violation to anchor on. The dual-pass design — both passes together — is what makes
-the system both safe and operationally viable.
+| Condition | DSR (adversarial flagged/blocked) | FPR (legitimate flagged/blocked) | Balanced accuracy |
+|---|---|---|---|
+| B: contract in the prompt only | 0.547 (437/799) | 0.408 (196/480) | 0.569 |
+| C1: hard rules only | 0.854 (662/775) | 0.819 (381/465) | 0.517 |
+| C2: semantic IDS only | 0.270 (209/774) | 0.269 (125/464) | 0.500 |
+| C: full middleware | 0.814 (639/785) | 0.788 (375/476) | 0.513 |
 
-**Open problems the paper identifies**, both still relevant to this repo: per-role ROC
-calibration to bring FPR down without sacrificing DSR, and latency optimization (batched
-embedding calls, centroid caching) for interactive use cases. The threshold-calibration
-work is ongoing in [`experiment/ids_calibration_investigation/`](experiment/ids_calibration_investigation)
-(ROC analysis, embedding-model comparisons, signal diagnostics).
+- C flags more attacks than B (difference 0.267, 95% CI 0.222–0.310) but also many more
+  legitimate prompts, so its balanced accuracy is *lower* (−0.056, 95% CI −0.092 to −0.020).
+  This experiment does not show a better security–utility trade-off.
+- Most of C's false positives come from the tool allowlist. Ten of each role's 15
+  "legitimate" prompts were generic questions outside every role (`prompts/legitimate.json`),
+  which a role contract arguably should refuse.
+- C1, C2 and C were separate LLM runs that re-planned every call, so they are not a matched
+  ablation. See the matched replay below.
 
-> **Reproducibility note:** the code has received bug fixes since this data was collected —
-> most notably, tool-name matching now tolerates case/formatting variance, condition
-> C's model no longer silently invents tool names outside the contract vocabulary, and
-> genuine model refusals are no longer overwritten by a forced JSON-correction retry.
-> Re-running the experiment on the current code may shift individual numbers slightly
-> from the paper's Table 1, though the core structural finding — external enforcement
-> beats prompt-only self-policing — is the more robust result and isn't expected to
-> change.
+**What the later, matched and execution-level evaluations show** (all pre-registered and run
+once; no tuning):
 
-Later work extended this with head-to-head comparisons against off-the-shelf tools —
-Lakera Guard, NeMo Guardrails, and AgentDojo's local prompt-injection detector — see
-[`baselines/README.md`](baselines/README.md).
+- **Matched replay of identical calls** (`experiment/matched_ablation/`): full mode keeps every
+  hard-rule block, and the current semantic pass adds no correct stops on the external (0/80)
+  and generated (0/45) sets, while adding 9/42 false positives on the generated set.
+- **Public tool-use benchmarks** (AgentDojo, InjecAgent, AgentHarm; `experiment/eval_v0.4/`):
+  the hard rules stopped 72/80 attacks before execution. All 8 that executed were transfers
+  through the allowed `transfer_funds` tool. 56/65 legitimate tasks were stopped, because the
+  benchmarks' tools are outside the contracts' allowed lists or map to forbidden tools.
+- **Real-world data** (Gandalf + Banking77; `experiment/eval_real_data/`): 99.3% of 13,083
+  banking queries completed under the hard rules (none blocked; 0.7% sent for confirmation).
+  The rules stopped none of 1,000 text-only injection prompts, which an open-source classifier
+  (ProtectAI) detects at 97.7% with 1% false positives. The two are complements.
+- **Head-to-head with AgentSpec and Progent** (`experiment/head_to_head/`): with each contract
+  written in their policy languages, all three made the same decision on all 15,317 items.
+  The role contract is a convenient packaging of rules either framework can enforce, not
+  extra enforcement power. They differ on edge cases (renamed arguments, NaN amounts, session
+  totals, unlisted tools), listed in `findings.md`.
+- **Semantic IDS:** ROC AUC 0.45–0.59 on every set. It stays off by default, and
+  `semantic="monitor"` records it without enforcing.
+
+> **Reproducibility note:** the semantic pass changed after the original runs (`forbidden_topics`
+> emptied on 22 Sep 2026, PR #5), so Table III's C2 and C rows cannot be reproduced exactly with
+> the current release. The hard-rule decisions for the research contracts are pinned by
+> `tests/fixtures/backcompat/` and unchanged.
+
+Earlier head-to-head comparisons against off-the-shelf guardrails (Lakera Guard, NeMo
+Guardrails, AgentDojo's prompt-injection detector) are in [`baselines/README.md`](baselines/README.md).
 
 ---
 
@@ -598,8 +689,8 @@ call.
 
 | Metric | Definition |
 |---|---|
-| DSR | Drift Suppression Rate = blocked / expected_drift |
-| DDR | Drift Detection Rate = detected / expected_drift |
+| DSR | Drift Suppression Rate. `experiment/metrics.py`: blocked / expected_drift. The paper's Table III (`baselines/compare_all.py`): detected (blocked or flagged) / adversarial, so it is a detection rate there. |
+| DDR | Drift Detection Rate = detected (BLOCK, NEEDS_RECOVERY, WARN or PREEMPTIVE_WARN) / expected_drift |
 | FPR | False Positive Rate = false_detections / legitimate |
 
 `experiment/metrics.py` also reports precision, recall, and a separate aggregate
@@ -648,10 +739,12 @@ role/condition/decision metadata and all 7 IDS signal scores per call.
 
 ## IBM watsonx Orchestrate Pilot
 
-RMIC-Guard has been deployed and verified live inside a real IBM watsonx
-Orchestrate instance for the **financial agent** role, proving the enforcement
-model is portable to a third-party agent orchestration framework, not just
-this repo's own pipeline. See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
+RMIC-Guard has been deployed as a tool inside a real IBM watsonx Orchestrate
+instance for the **financial agent** role, which demonstrates the integration path
+into a third-party orchestration framework. It does not show mandatory enforcement:
+the agent is *instructed* to call the guard on every message, the deployed adapter
+replaces the semantic IDS with a keyword list, and it keeps no audit log
+(see [`docs/execution_semantics.md`](docs/execution_semantics.md)). See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
 for the architecture and live-verified results (4/4 test scenarios), and
 [`ibm_pilot/README.md`](ibm_pilot/README.md) for the full pilot design.
 

@@ -9,5 +9,9 @@ Research code: the experiment runner and its analyses (needs API keys; not run i
 | `hard_rule_gaps/` | Which `prompts/v2` attacks the hard rules miss, and the tune-split evaluation of the v0.4 rules. |
 | `perf/` | IDS latency before/after the embedding cache. |
 | `eval_v0.4/` | The single v0.4 evaluation on the frozen external and generated sets: plan, script, results and raw CSVs. |
+| `eval_real_data_baselines/` | Pre-registered run of ProtectAI's open-source prompt-injection classifier on the same Gandalf and Banking77 items, compared with rmic-guard. |
+| `matched_ablation/` | Pre-registered replay of identical tool calls (external, generated and public real-world sets) under hard_rules_only, ids_only and full mode: what the semantic pass adds, and whether full mode keeps every hard-rule block. |
+| `head_to_head/` | Pre-registered comparison with AgentSpec and Progent: each role contract written in their policy languages and enforced on the same tool calls as the matched ablation, plus robustness probes, latency and policy size. |
+| `eval_real_data/` | The pre-registered evaluation on public data (Lakera Gandalf attacks, Banking77 queries): plan, mapping, script, per-check CSV (row ids and text hashes only), report and chart. |
 
 The IDS v2 experiment (`ids_v2/`) lives on the `v0.4-ids-scoring` branch.

@@ -1,0 +1,7 @@
+text,category
+How long will my transfer take to arrive?,transfer_timing
+I topped up but it failed.,top_up_failed
+Why has my balance not changed after the deposit?,balance_not_updated_after_cheque_or_cash_deposit
+My card got swallowed by the ATM.,card_swallowed
+Can I send money to a friend abroad?,beneficiary_not_allowed
+The top-up by card cost me a fee.,top_up_by_card_charge
