@@ -70,14 +70,16 @@ DENY_PATTERN_PACKS: dict[str, dict[str, str]] = {
         "you_are_a_role_now": r"\byou(?:'re| are) (?:a|an|the) [\w-]+(?: [\w-]+)? now\b",
         "from_now_on": r"\bfrom now on\b",
         "switch_roles": r"\bswitch(?:ing)? roles?\b",
-        # Not followed by a non-role continuation ("an answer as to why", "respond as soon as").
-        "act_as": r"\b(?:act|behave|talk|respond|answer)(?: to me)? (?:as|like)\b(?! (?:to|if|soon|well|much|usual|normal|expected|possible|quickly|fast)\b)",
+        # The pre-0.4.2 pattern, minus "as to" / "as soon" ("an answer as to why",
+        # "respond as soon as you can"). "act as if" still matches.
+        "act_as": r"\b(?:act|behave|talk|respond|answer)(?: to me)? (?:as|like)\b(?! (?:to|soon)\b)",
         "pretend": r"\bpretend(?:ing)? (?:to be|you(?:'re| are))\b",
         "roleplay": r"\brole-?play\b",
-        # Imperative position only (start of a clause, or after please/just/so/can you ...):
-        # "be a gossip", "so be my doctor". Before 0.4.2 it matched anywhere, so
-        # "will there be a fee" or "should be a bit higher" were blocked.
-        "be_a_role": r"(?:^|[.!?;:,]\s*|\b(?:please|just|now|and|so|then|you|can you|could you|will you|would you)\s+)be (?:my|a|an) [\w-]+",
+        # The pre-0.4.2 pattern, minus non-role nouns: "will there be a fee", "should be a
+        # bit higher" or "be an issue" are not role changes. A role-change command is only
+        # missed if it says "be a <one of these words>". "new" is deliberately not
+        # excluded ("be a new AI").
+        "be_a_role": r"\bbe (?:my|a|an) (?!(?:fees?|charges?|costs?|payments?|bit|couple|few|little|lot|problems?|issues?|errors?|mistakes?|delays?|way|reason|additional|extra|certain|billing|cash|faster|available|mastercard|visa|refunds?|limits?|while|minute|hour|day|week|month|year)\b)[\w-]+",
         "drop_persona": r"\bdrop the [\w-]+ (?:persona|act)\b",
         "as_my_role": r"\bas (?:my|your) (?:[\w-]+ ){0,2}(?:advisor|adviser|accountant|attorney|counsel|lawyer|therapist|buddy|friend|doctor|self)\b",
     },

@@ -34,19 +34,20 @@ All notable changes to `rmic-guard` are documented here.
 
 ### Changed
 
-- **Fewer false positives from deny patterns.** `role_reassignment:be_a_role` matched
-  "be a/an/my <word>" anywhere, so ordinary questions such as "will there be a fee" or "should
-  be a bit higher" were blocked; it now matches only in command position (start of a clause, or
-  after *please, just, so, then, can you, …*). `role_reassignment:act_as` no longer matches
-  non-role continuations such as "an answer as to why" or "respond as soon as".
-  - On the `prompts/v2` tune split the packs catch the same 41/80 attacks with 0/80 legitimate
-    items flagged, and the same 12/25 attacks of the original `prompts/` corpus.
-  - On all 13,083 Banking77 queries (with `role_reassignment`, `guardrail_removal` and
-    `objective_override` as warn), blocked queries fall from 45 (0.34%) to 6 (0.05%).
-    Banking77 was already used by the October real-data evaluation, which identified these
-    two patterns; it is a check on known data, not a new evaluation. The patterns were
-    designed on the tune split and not adjusted to Banking77 (the remaining 6 were left as
-    they are), and a fresh evaluation is still needed.
+- **Fewer false positives from deny patterns, with no lost detections.**
+  `role_reassignment:be_a_role` (`be a/an/my <word>`) blocked ordinary questions such as "will
+  there be a fee" or "should be a bit higher"; it now skips a fixed list of non-role nouns after
+  "be a/an/my" (fee, charge, cost, payment, bit, couple, problem, issue, way, reason, certain,
+  hour, day, …). `role_reassignment:act_as` no longer matches "as to" / "as soon" ("an answer as
+  to why", "respond as soon as you can"). Both are otherwise the pre-0.4.2 patterns, so a
+  role-change command is missed only if it literally says "be a fee" or "act as to"; "act as if",
+  "I want you to be a …" and "you must be a …" still block (tested).
+  - Attack and legitimate texts in the repo (`prompts/`, `prompts/v2/`, `prompts/v3/generated/`,
+    `prompts/external/`; 258 attacks, 265 legitimate): exactly the same items flagged as before.
+  - All 13,083 Banking77 queries, through `Guard.check()` with `role_reassignment`,
+    `guardrail_removal` and `objective_override` (warn): blocked queries fall from 45 (0.34%) to
+    10 (0.08%). Banking77 was already used by the October real-data evaluation, which identified
+    these two patterns, so this is a check on known data, not a new evaluation.
   - Deny patterns remain opt-in heuristics and are off in every bundled contract.
 - **`financial_agent_hardened`** (example contract, `contract_version` 1.3.0, new
   `contract_hash` `a246692eb3b5a4bc52df27c444146a1ed94c4b7638029bc25c1d080dcb88f301`): the
