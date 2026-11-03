@@ -12,6 +12,7 @@ are capped in number (oldest evicted first) and can be listed or cancelled.
 
 from __future__ import annotations
 
+import math
 import secrets
 import threading
 import time
@@ -29,6 +30,7 @@ from rmic_guard._core.hard_rules import (
     check_session_limits,
     confirmation_reason,
     deny_pattern_matches,
+    matching_argument_values,
 )
 from rmic_guard._core.ids_engine import IDSEngine
 from rmic_guard._core.recovery_engine import reanchoring_system_message, reanchoring_user_nudge
@@ -80,27 +82,41 @@ class EnforcementOutcome:
 
 
 def _numeric_for_type(val: Any, value_type: str) -> float:
+    """The constrained value as a float. Raises TypeError/ValueError if it is
+    not a number (booleans included), and ValueError("not_finite") for NaN and
+    infinities, which compare False against every bound."""
+    if isinstance(val, bool):
+        raise TypeError("a boolean is not a number")
+    v = float(val)
+    if not math.isfinite(v):
+        raise ValueError("not_finite")
     if value_type == "int":
-        return float(int(val))
-    return float(val)
+        try:
+            return float(int(val))
+        except OverflowError as exc:  # pragma: no cover - unreachable after the finite check
+            raise ValueError("not_finite") from exc
+    return v
 
 
 def _check_parameter_constraints(
     contract: RMICContract,
     arguments: dict[str, Any],
 ) -> str | None:
+    """Bounds apply to every argument whose name matches the constraint's,
+    ignoring case, spaces and hyphens (Amount, AMOUNT and "amount" are all
+    "amount"), so renaming an argument does not skip its bounds."""
     by_name = contract.constraints_by_name()
     for name, spec in by_name.items():
-        if name not in arguments:
-            continue
-        try:
-            v = _numeric_for_type(arguments[name], spec.value_type)
-        except (TypeError, ValueError):
-            return f"parameter_constraint:{name}:not_numeric"
-        if spec.max is not None and v > float(spec.max):
-            return f"parameter_constraint:{name}:above_max"
-        if spec.min is not None and v < float(spec.min):
-            return f"parameter_constraint:{name}:below_min"
+        for value in matching_argument_values(arguments, name):
+            try:
+                v = _numeric_for_type(value, spec.value_type)
+            except (TypeError, ValueError) as exc:
+                kind = "not_finite" if str(exc) == "not_finite" else "not_numeric"
+                return f"parameter_constraint:{name}:{kind}"
+            if spec.max is not None and v > float(spec.max):
+                return f"parameter_constraint:{name}:above_max"
+            if spec.min is not None and v < float(spec.min):
+                return f"parameter_constraint:{name}:below_min"
     return None
 
 
@@ -126,7 +142,7 @@ def _check_hard_rules(
 
     if planned in forbidden_norm:
         return "forbidden_tool"
-    if allowed_norm and planned not in allowed_norm:
+    if allowed_norm and planned not in allowed_norm and contract.unlisted_tools != "confirm":
         return "tool_not_allowed"
     ar = check_argument_rules(contract.argument_rules, plan.tool_name, plan.arguments)
     if ar:
@@ -142,6 +158,18 @@ def _check_hard_rules(
         return ds
     blocked, _ = deny_pattern_matches(contract.deny_patterns, _deny_text(plan))
     return blocked
+
+
+def _unlisted_tool_reason(contract: RMICContract, plan: PlannedToolCall) -> str | None:
+    """'unlisted_tool:<name>' when the contract sends tools outside allowed_actions
+    to confirmation (unlisted_tools: "confirm") and this is one. Forbidden tools
+    never get here: they block first."""
+    if contract.unlisted_tools != "confirm" or not contract.allowed_actions:
+        return None
+    allowed_norm = {_normalize_tool_name(a) for a in contract.allowed_actions}
+    if _normalize_tool_name(plan.tool_name) in allowed_norm:
+        return None
+    return f"unlisted_tool:{plan.tool_name}"
 
 
 def _deny_text(plan: PlannedToolCall) -> str:
@@ -313,7 +341,9 @@ class EnforcementEngine:
         if enforcement_mode == "ids_only":  # hard rules (and these extensions) are skipped
             return None, None, ()
         _, warnings = deny_pattern_matches(self.contract.deny_patterns, _deny_text(plan))
-        reason = confirmation_reason(self.contract.parameter_constraints, plan.arguments)
+        reason = _unlisted_tool_reason(self.contract, plan) or confirmation_reason(
+            self.contract.parameter_constraints, plan.arguments
+        )
         if reason is None:
             return None, None, warnings
         confirmation_id = secrets.token_urlsafe(16)

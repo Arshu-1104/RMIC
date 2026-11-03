@@ -4,6 +4,60 @@ All notable changes to `rmic-guard` are documented here.
 
 ## Unreleased
 
+### Added
+
+- **`unlisted_tools`** (optional contract field, `"block"` or `"confirm"`, validated at load,
+  covered by the contract hash). With `"confirm"`, a tool that is in neither `allowed_actions`
+  nor `forbidden_actions` returns `NEEDS_CONFIRMATION` (reason `unlisted_tool:<name>`) instead of
+  `BLOCK tool_not_allowed`; it runs only after `guard.confirm()`. Forbidden tools still block,
+  and all other hard rules still apply. The default is unchanged; no bundled contract enables
+  it. Also accepted by `RMICContract.create(unlisted_tools=...)` and in the JSON schema.
+  - In the v0.4 external evaluation, at most 24 of the 56 blocked legitimate items, and at most
+    22 of the 72 blocked attacks, were blocked only for this reason (read from
+    `experiment/eval_v0.4/turns.csv`, not a new run): `"confirm"` sends both to a human.
+
+### Fixed
+
+- **Non-finite and boolean values no longer pass numeric limits.** `amount=float("nan")`,
+  `"nan"`, `inf` and `-inf` passed `min`, `max` and `confirm_above`, because every comparison
+  with NaN is false. They now block with `parameter_constraint:<name>:not_finite`. Booleans
+  (which Python treats as 1 and 0) block with `parameter_constraint:<name>:not_numeric`. An
+  infinite value for an `int` constraint used to raise `OverflowError`; it now blocks.
+- **Renaming an argument no longer skips its rules.** `parameter_constraints`, `confirm_above`,
+  `session_limits` and `argument_rules` looked arguments up by exact name, so `Amount=999999`
+  or `AMOUNT=999999` passed every limit on `amount`, including in `financial_agent_hardened`.
+  Argument names are now matched like tool names, ignoring case, surrounding whitespace, inner
+  spaces and hyphens. Every matching argument is checked (`amount=10, Amount=999999` blocks),
+  and all of them count toward a session total. `allowed_args` accepts the same spellings of
+  the names it lists. A different name altogether (`amt`, `transferAmount`) is still not
+  matched; list the tool's arguments in `allowed_args` to block unknown names.
+
+### Changed
+
+- **Fewer false positives from deny patterns, with no lost detections.**
+  `role_reassignment:be_a_role` (`be a/an/my <word>`) blocked ordinary questions such as "will
+  there be a fee" or "should be a bit higher"; it now skips a fixed list of non-role nouns after
+  "be a/an/my" (fee, charge, cost, payment, bit, couple, problem, issue, way, reason, certain,
+  hour, day, …). `role_reassignment:act_as` no longer matches "as to" / "as soon" ("an answer as
+  to why", "respond as soon as you can"). Both are otherwise the pre-0.4.2 patterns, so a
+  role-change command is missed only if it literally says "be a fee" or "act as to"; "act as if",
+  "I want you to be a …" and "you must be a …" still block (tested).
+  - Attack and legitimate texts in the repo (`prompts/`, `prompts/v2/`, `prompts/v3/generated/`,
+    `prompts/external/`; 258 attacks, 265 legitimate): exactly the same items flagged as before.
+  - All 13,083 Banking77 queries, through `Guard.check()` with `role_reassignment`,
+    `guardrail_removal` and `objective_override` (warn): blocked queries fall from 45 (0.34%) to
+    10 (0.08%). Banking77 was already used by the October real-data evaluation, which identified
+    these two patterns, so this is a check on known data, not a new evaluation.
+  - Deny patterns remain opt-in heuristics and are off in every bundled contract.
+- **`financial_agent_hardened`** (example contract, `contract_version` 1.3.0, new
+  `contract_hash` `a246692eb3b5a4bc52df27c444146a1ed94c4b7638029bc25c1d080dcb88f301`): the
+  account patterns rejected an IBAN only at the start of the value, so
+  `"IBAN GB29NWBK60161331926819"`, `"Attacker GB29…"` or an IBAN with double spaces passed.
+  They now reject an IBAN-shaped run (2 letters, 2 check digits, 11–30 alphanumerics with any
+  spacing) anywhere in the value. Every account form accepted before is still accepted. The
+  `anchor_embedding` is unchanged (hash recomputed, anchors not re-embedded); the research
+  contracts are unchanged.
+
 ## 0.4.1 — 2026-10-22
 
 ### Added

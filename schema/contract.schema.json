@@ -156,6 +156,10 @@
         }
       }
     },
+    "unlisted_tools": {
+      "type": "string", "enum": ["block", "confirm"], "default": "block",
+      "description": "What happens to a tool that is in neither allowed_actions nor forbidden_actions (only when allowed_actions is non-empty). \"block\" (default): BLOCK with tool_not_allowed. \"confirm\": NEEDS_CONFIRMATION with reason unlisted_tool:<name>; the tool runs only after guard.confirm(). Forbidden tools always BLOCK."
+    },
     "ids_warn_threshold": {
       "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,
       "description": "IDS score at/above which a WARN + re-anchoring recovery is triggered."
