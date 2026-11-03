@@ -107,3 +107,16 @@ The same sets as `experiment/matched_ablation/`:
   predicates) and Progent policies (JSON Schema, LLM updates) can express. Identical decisions
   on these sets would show that the role contract is a convenient packaging of rules either
   framework can enforce, not that rmic-guard enforces more.
+
+## Amendment before the run (smoke test on synthetic calls only)
+
+- **Progent confirmation policy.** Progent skips restrictions on arguments a call does not
+  carry, so a forbid policy also matches calls *without* the argument: the first translation
+  asked for confirmation on `check_balance()`. The `confirm_above` forbid policy is therefore
+  attached only to tools that are called with that parameter (from the tool calls in the sets
+  and probes, i.e. the tool's signature as the agent uses it). The allow-policy bounds are
+  unchanged: an absent argument is simply not checked, as in rmic-guard.
+- **Load order.** Progent is imported before AgentSpec's LangChain stand-ins, so that Progent's
+  optional LangChain integration (`try: import langchain`) stays off.
+
+Found by `smoke_h2h`-style checks on the synthetic probe calls; no evaluation item was run.
