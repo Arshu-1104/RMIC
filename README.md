@@ -605,43 +605,60 @@ drift attempts, plus legitimate/benign controls).
 
 ## Results
 
-The original RMIC-Guard experiment — 4 LLMs (claude-sonnet-4-6, claude-haiku-4-5,
-llama-3.3-70b-versatile, llama-3.1-8b-instant), 4 agent roles, 5,212 API calls across two full
-runs — is written up in:
+The original RMIC-Guard experiment (May–July 2026; 4 LLM configurations: claude-sonnet-4-6,
+claude-haiku-4-5 and groq/llama-3.3-70b-versatile + llama-3.1-8b-instant; 4 agent roles; 5
+drift categories; 5,338 logged evaluations in the full-mode runs) is written up in:
 
-> **"Role Model Identity Contract Enforcement as a Structural Determinant of Identity
-> Drift Suppression in Autonomous LLM Agents"** — Sahana B, Charithra H S, Arshitha S,
-> Chandrakala, Neethu B Krishna, Soumya Prasada, Bhanupriya P, Aryaman Tiwary —
-> submitted to *International Journal of Electrical and Computer Engineering (IJECE)*.
+> **"RMIC-GUARD: Runtime Enforcement of Role Identity Contracts for Suppressing Identity Drift
+> in Autonomous LLM Agents"**: Sahana B, Arshitha S, Charithra H S, Chandrakala, Neethu B
+> Krishna, Soumya Prasada, Bhanupriya P, Aryaman Tiwary. *Journal of Advances in Information
+> Technology* (JAIT), manuscript 24005, under revision.
 
-**Headline finding:** external middleware enforcement (Condition C) reached DSR 0.952–
-1.000 across all four models, while the best prompt-only condition (B) reached only DSR
-0.391 (weakest model: 0.020) — a result that holds regardless of model architecture or
-capability tier (χ²(3) = 847.3, p < 0.0001; Cohen's d = 1.84 for Base IDS, C vs. B).
+**What the original experiment shows** (Table III of the revised manuscript). In these runs
+"DSR" counts adversarial prompts that were *blocked or flagged* (BLOCK, NEEDS_RECOVERY or
+PREEMPTIVE_WARN for C1/C2/C; a refusal for B), so it measures detection, not prevention, and
+tools were not executed.
 
-**Ablation:** hard rules alone (C1) suppress drift (DSR ≈ 1.000) but at a steep false-positive
-cost (FPR 0.62–0.67). Semantic IDS alone (C2) cannot issue terminal blocks without a hard-
-rule violation to anchor on. The dual-pass design — both passes together — is what makes
-the system both safe and operationally viable.
+| Condition | DSR (adversarial flagged/blocked) | FPR (legitimate flagged/blocked) | Balanced accuracy |
+|---|---|---|---|
+| B: contract in the prompt only | 0.547 (437/799) | 0.408 (196/480) | 0.569 |
+| C1: hard rules only | 0.854 (662/775) | 0.819 (381/465) | 0.517 |
+| C2: semantic IDS only | 0.270 (209/774) | 0.269 (125/464) | 0.500 |
+| C: full middleware | 0.814 (639/785) | 0.788 (375/476) | 0.513 |
 
-**Open problems the paper identifies**, both still relevant to this repo: per-role ROC
-calibration to bring FPR down without sacrificing DSR, and latency optimization (batched
-embedding calls, centroid caching) for interactive use cases. The threshold-calibration
-work is ongoing in [`experiment/ids_calibration_investigation/`](experiment/ids_calibration_investigation)
-(ROC analysis, embedding-model comparisons, signal diagnostics).
+- C flags more attacks than B (difference 0.267, 95% CI 0.222–0.310) but also many more
+  legitimate prompts, so its balanced accuracy is *lower* (−0.056, 95% CI −0.092 to −0.020).
+  This experiment does not show a better security–utility trade-off.
+- Most of C's false positives come from the tool allowlist. Ten of each role's 15
+  "legitimate" prompts were generic questions outside every role (`prompts/legitimate.json`),
+  which a role contract arguably should refuse.
+- C1, C2 and C were separate LLM runs that re-planned every call, so they are not a matched
+  ablation. See the matched replay below.
 
-> **Reproducibility note:** the code has received bug fixes since this data was collected —
-> most notably, tool-name matching now tolerates case/formatting variance, condition
-> C's model no longer silently invents tool names outside the contract vocabulary, and
-> genuine model refusals are no longer overwritten by a forced JSON-correction retry.
-> Re-running the experiment on the current code may shift individual numbers slightly
-> from the paper's Table 1, though the core structural finding — external enforcement
-> beats prompt-only self-policing — is the more robust result and isn't expected to
-> change.
+**What the later, matched and execution-level evaluations show** (all pre-registered and run
+once; no tuning):
 
-Later work extended this with head-to-head comparisons against off-the-shelf tools —
-Lakera Guard, NeMo Guardrails, and AgentDojo's local prompt-injection detector — see
-[`baselines/README.md`](baselines/README.md).
+- **Matched replay of identical calls** (`experiment/matched_ablation/`): full mode keeps every
+  hard-rule block, and the current semantic pass adds no correct stops on the external (0/80)
+  and generated (0/45) sets, while adding 9/42 false positives on the generated set.
+- **Public tool-use benchmarks** (AgentDojo, InjecAgent, AgentHarm; `experiment/eval_v0.4/`):
+  the hard rules stopped 72/80 attacks before execution. All 8 that executed were transfers
+  through the allowed `transfer_funds` tool. 56/65 legitimate tasks were stopped, because the
+  benchmarks' tools are outside the contracts' allowed lists or map to forbidden tools.
+- **Real-world data** (Gandalf + Banking77; `experiment/eval_real_data/`): 99.3% of 13,083
+  banking queries completed under the hard rules (none blocked; 0.7% sent for confirmation).
+  The rules stopped none of 1,000 text-only injection prompts, which an open-source classifier
+  (ProtectAI) detects at 97.7% with 1% false positives. The two are complements.
+- **Semantic IDS:** ROC AUC 0.45–0.59 on every set. It stays off by default, and
+  `semantic="monitor"` records it without enforcing.
+
+> **Reproducibility note:** the semantic pass changed after the original runs (`forbidden_topics`
+> emptied on 22 Sep 2026, PR #5), so Table III's C2 and C rows cannot be reproduced exactly with
+> the current release. The hard-rule decisions for the research contracts are pinned by
+> `tests/fixtures/backcompat/` and unchanged.
+
+Earlier head-to-head comparisons against off-the-shelf guardrails (Lakera Guard, NeMo
+Guardrails, AgentDojo's prompt-injection detector) are in [`baselines/README.md`](baselines/README.md).
 
 ---
 
@@ -667,8 +684,8 @@ call.
 
 | Metric | Definition |
 |---|---|
-| DSR | Drift Suppression Rate = blocked / expected_drift |
-| DDR | Drift Detection Rate = detected / expected_drift |
+| DSR | Drift Suppression Rate. `experiment/metrics.py`: blocked / expected_drift. The paper's Table III (`baselines/compare_all.py`): detected (blocked or flagged) / adversarial, so it is a detection rate there. |
+| DDR | Drift Detection Rate = detected (BLOCK, NEEDS_RECOVERY, WARN or PREEMPTIVE_WARN) / expected_drift |
 | FPR | False Positive Rate = false_detections / legitimate |
 
 `experiment/metrics.py` also reports precision, recall, and a separate aggregate
@@ -717,10 +734,12 @@ role/condition/decision metadata and all 7 IDS signal scores per call.
 
 ## IBM watsonx Orchestrate Pilot
 
-RMIC-Guard has been deployed and verified live inside a real IBM watsonx
-Orchestrate instance for the **financial agent** role, proving the enforcement
-model is portable to a third-party agent orchestration framework, not just
-this repo's own pipeline. See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
+RMIC-Guard has been deployed as a tool inside a real IBM watsonx Orchestrate
+instance for the **financial agent** role, which demonstrates the integration path
+into a third-party orchestration framework. It does not show mandatory enforcement:
+the agent is *instructed* to call the guard on every message, the deployed adapter
+replaces the semantic IDS with a keyword list, and it keeps no audit log
+(see [`docs/execution_semantics.md`](docs/execution_semantics.md)). See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
 for the architecture and live-verified results (4/4 test scenarios), and
 [`ibm_pilot/README.md`](ibm_pilot/README.md) for the full pilot design.
 
