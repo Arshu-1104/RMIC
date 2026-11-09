@@ -609,8 +609,9 @@ The original RMIC-Guard experiment (May–July 2026; 4 LLM configurations: claud
 claude-haiku-4-5 and groq/llama-3.3-70b-versatile + llama-3.1-8b-instant; 4 agent roles; 5
 drift categories; 5,338 logged evaluations in the full-mode runs) is written up in:
 
-> **"RMIC-GUARD: Runtime Enforcement of Role Identity Contracts for Suppressing Identity Drift
-> in Autonomous LLM Agents"**: Sahana B, Arshitha S, Charithra H S, Chandrakala, Neethu B
+> **"RMIC-Guard: Sealed Role Contracts for Runtime Enforcement of LLM Agent Tool Use"**
+> (submitted under the earlier title "RMIC-GUARD: Runtime Enforcement of Role Identity Contracts
+> for Suppressing Identity Drift in Autonomous LLM Agents"): Sahana B, Arshitha S, Charithra H S, Chandrakala, Neethu B
 > Krishna, Soumya Prasada, Bhanupriya P, Aryaman Tiwary. *Journal of Advances in Information
 > Technology* (JAIT), manuscript 24005, under revision.
 
@@ -740,12 +741,13 @@ role/condition/decision metadata and all 7 IDS signal scores per call.
 ## IBM watsonx Orchestrate Pilot
 
 RMIC-Guard has been deployed as a tool inside a real IBM watsonx Orchestrate
-instance for the **financial agent** role, which demonstrates the integration path
-into a third-party orchestration framework. It does not show mandatory enforcement:
+instance for four agent roles (financial, support, healthcare research, and legal
+review), which demonstrates the integration path into a third-party orchestration
+framework. It does not show mandatory enforcement:
 the agent is *instructed* to call the guard on every message, the deployed adapter
 replaces the semantic IDS with a keyword list, and it keeps no audit log
 (see [`docs/execution_semantics.md`](docs/execution_semantics.md)). See [`ibm_pilot/LIVE_DEPLOYMENT.md`](ibm_pilot/LIVE_DEPLOYMENT.md)
-for the architecture and live-verified results (4/4 test scenarios), and
+for the architecture and the live-verified results of the financial agent (4/4 test scenarios), and
 [`ibm_pilot/README.md`](ibm_pilot/README.md) for the full pilot design.
 
 Because Orchestrate's Python-tool sandbox only receives a single file plus a
@@ -757,9 +759,11 @@ stand-in for the semantic IDS scoring.
 The same standalone pattern has also been implemented for the **legal review**
 (`legal_guard_tool_standalone.py`, `rmic_legal_review_agent.yaml`) and
 **healthcare research** (`orchestrate_tool_standalone_healthcare.py`,
-`pubmed_search.py`, `rmic_healthcare_agent.yaml`) agent roles. These are not
-yet documented as live-tested in an Orchestrate instance — only the financial
-agent pilot has recorded live deployment results.
+`pubmed_search.py`, `rmic_healthcare_agent.yaml`) agent roles. All four roles
+(including the support agent) were exercised in the live Orchestrate instance. Only the
+financial agent has a recorded four-scenario result table; for the other three roles the
+manuscript shows single traces (its Figures 7–11), which illustrate the integration and
+are not systematic results.
 
 **Demo video:** [RMIC-Guard × IBM watsonx Orchestrate — Live Pilot Demo](https://youtu.be/xQer0t_11fo)
 
