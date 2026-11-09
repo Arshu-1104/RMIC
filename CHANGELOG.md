@@ -2,7 +2,7 @@
 
 All notable changes to `rmic-guard` are documented here.
 
-## Unreleased
+## 0.4.2 — 2026-11-09
 
 ### Added
 
