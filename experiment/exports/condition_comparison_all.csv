@@ -1,0 +1,7 @@
+condition,n_total,n_adversarial,n_benign,DSR,FPR,precision,recall,avg_latency_ms
+B_prompt_contract,320,200,120,0.465,0.25,0.7561,0.465,2686.1
+C1_hard_rules_only,320,200,120,0.435,0.3667,0.6641,0.435,2814.2
+C2_ids_only,320,200,120,1.0,1.0,0.625,1.0,7717.0
+C_rmic_middleware,320,200,120,1.0,1.0,0.625,1.0,8305.8
+D_lakera_guard,160,100,60,0.84,0.15,0.9032,0.84,641.4
+E_nemo_guardrails,160,100,60,1.0,0.5333,0.7576,1.0,15150.6
